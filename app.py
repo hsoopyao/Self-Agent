@@ -1,74 +1,44 @@
-# 样式函数
-# app.py 顶部
-def render_thought(content: str) -> str:
-    """渲染思考过程（灰色背景、斜体）"""
-    return f"""
-    <div style="
-        background-color: #f5f5f5;
-        padding: 8px 12px;
-        border-left: 4px solid #9e9e9e;
-        margin: 6px 0;
-        font-size: 0.9em;
-        color: #555;
-        border-radius: 4px;
-        font-style: italic;
-    ">
-    {content}
-    </div>
-    """
-
-def render_action(content: str) -> str:
-    """渲染工具调用（蓝色边框）"""
-    return f"""
-    <div style="
-        background-color: #e3f2fd;
-        padding: 6px 12px;
-        border-left: 4px solid #1976d2;
-        margin: 4px 0;
-        font-size: 0.9em;
-        font-family: monospace;
-        border-radius: 4px;
-    ">
-    {content}
-    </div>
-    """
-
-def render_observation(content: str) -> str:
-    """渲染观察结果（绿色背景，普通字体，链接可点击）"""
-    return f"""
-    <div style="
-        background-color: #e8f5e9;
-        padding: 8px 12px;
-        border-left: 4px solid #388e3c;
-        margin: 6px 0;
-        font-size: 0.95em;
-        font-family: inherit;
-        border-radius: 4px;
-        color: #1e3a5f;
-        word-wrap: break-word;
-        overflow-wrap: break-word;
-    ">
-    {content}
-    </div>
-    """
-
-import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import sys
 
 import streamlit as st
-from src.rag_chain import rag_chain_with_docs
-from src.general_chat import general_chat_stream
-from src.vectorstore import search_with_score, list_documents, get_vectorstore
-from src.router import route_query
+
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+st.set_page_config(page_title="智能助手", layout="centered")
+
+from src.context_manager import count_tokens, trim_history
 from src.direct_chat import direct_chat_stream
-from src.pages.knowledges import main as knowledge_page  # 导入文档管理页面
-from src.context_manager import trim_history, count_tokens
-from src.vectorstore import chunk_file_from_bytes, create_temp_vectorstore
+from src.general_chat import general_chat_stream
+from src.pages.knowledges import main as knowledge_page
+from src.rag_chain import rag_chain_with_docs
+from src.router import route_query
+from src.theme import GITHUB_URL, apply_theme, get_theme, initialize_theme, toggle_theme
+from src.vectorstore import (
+    chunk_file_from_bytes,
+    create_temp_vectorstore,
+    get_vectorstore,
+    list_documents,
+    search_with_score,
+)
+
+
+def render_thought(content: str) -> str:
+    """渲染思考过程。"""
+    return f'<div class="react-card react-thought">{content}</div>'
+
+def render_action(content: str) -> str:
+    """渲染工具调用。"""
+    return f'<div class="react-card react-action">{content}</div>'
+
+def render_observation(content: str) -> str:
+    """渲染观察结果和可点击出处。"""
+    return f'<div class="react-card react-observation">{content}</div>'
 
 INTRODUCE = "您好！我可以回答内部知识，也能进行常识问答和联网搜索。请问有什么可以帮助您？"
 
-st.set_page_config(page_title="智能助手", layout="centered")
+initialize_theme()
+apply_theme()
 
 # 初始化配置（如果 session_state 中没有）
 DEFAULT_CONFIG = {
@@ -88,6 +58,17 @@ get_vectorstore()
 
 # ========== 全局侧边栏（所有页面共享） ==========
 with st.sidebar:
+    st.markdown("### 🎨 外观与项目")
+    theme_col, github_col = st.columns(2)
+    with theme_col:
+        theme_label = "🌙 深色" if get_theme() == "light" else "☀️ 浅色"
+        if st.button(theme_label, use_container_width=True, key="theme_toggle"):
+            toggle_theme()
+            st.rerun()
+    with github_col:
+        st.link_button("⭐ GitHub", GITHUB_URL, use_container_width=True)
+
+    st.divider()
     st.markdown("### 🧹 会话管理")
     if st.button("🗑️ 清空上下文窗口", use_container_width=True):
         st.session_state.messages = [
@@ -278,7 +259,7 @@ def chat_page():
                 if temp_vs is not None:
                     st.caption("📄 基于临时文件回答")
                     docs_and_scores = temp_vs.similarity_search_with_relevance_scores(user_input, k=4)
-                    if docs_and_scores and docs_and_scores[0][1] >= 0.3:
+                    if docs_and_scores and docs_and_scores[0][1] >= st.session_state.config_temp_score_threshold:
                         docs = [doc for doc, _ in docs_and_scores]
                         stream_gen = rag_chain_with_docs(docs, user_input)
                     else:
@@ -320,7 +301,11 @@ def chat_page():
                             if not docs_list:
                                 stream_gen = iter(["📭 内部知识库为空，请先在侧边栏上传相关 PDF 文档，然后再次提问。"])
                             else:
-                                has_match, docs, score = search_with_score(user_input, k=4, score_threshold=0.5)
+                                has_match, docs, score = search_with_score(
+                                    user_input,
+                                    k=4,
+                                    score_threshold=st.session_state.config_score_threshold,
+                                )
                                 if has_match:
                                     stream_gen = rag_chain_with_docs(docs, user_input)
                                 else:
