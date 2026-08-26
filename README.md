@@ -42,10 +42,12 @@
 ```md
 self-agent/
 ├── app.py                       # 主入口，包含导航和聊天界面
+├── .env                         # 环境变量（API Key 等，需自行创建）
 ├── chroma_db/                   # 向量数据库持久化目录（自动生成）
 ├── data/                        # 启动时自动加载的 PDF（示例文档）
 ├── doc/                         # 文档
-│   ├── update.md                # 更新日志
+│   ├── startup.md               # Windows / macOS 启动指南
+│   └── update.md                # 更新日志
 ├── init/                        # 初始化脚本
 │   ├── build_vectorstore.py     # 构建向量数据库
 │   ├── download_model.py        # 下载 BGE 检索增强模型
@@ -68,50 +70,18 @@ self-agent/
 │   ├── direct_chat.py           # 纯闲聊
 │   ├── router.py                # 意图路由
 │   ├── react_agent.py           # ReAct 多步推理
-│   ├── context_manager.py       # Token 计数与历史压缩
-│   └── .env                     # 环境变量（API Key 等）
+│   └── context_manager.py       # Token 计数与历史压缩
 ├── requirements.txt             # Python 依赖
 └── README.md                    # 项目说明
 ```
 
 ---
 
-## 🚀 快速启动（本地运行）
+## 🚀 快速启动
 
-### 1. 环境准备
+项目推荐使用 **Python 3.12** 和 `.venv` 虚拟环境。Windows 与 macOS 的完整安装、配置及启动流程请查看：
 
-- Python 3.10 或以上版本（建议使用虚拟环境）
-- 安装依赖：
-  ```bash
-  pip install -r requirements.txt
-若需要使用 BGE 本地模型，请确保已有模型文件（或自动下载）。本项目默认使用 bge-small-zh-v1.5，可自行替换。
-
-### 2. 配置环境变量
-在项目根目录创建 .env 文件，填入以下信息：
-
-```dotenv
-# 智谱 BigModel API Key（必填）
-BIGMODEL_API_KEY=your_api_key_here
-
-#### 可选：模型名称（默认 glm-4-flash）
-MODEL_NAME=glm-4-flash
-
-#### Tavily 搜索引擎 API Key（必填，用于联网搜索）
-TAVILY_API_KEY=your_tavily_key_here
-```
-
-### 3. 启动应用
-在项目根目录执行：
-
-```bash
-streamlit run app.py
-```
-
-浏览器将自动打开 `http://localhost:8501`，即可使用。
-
-### 4. 首次启动行为
-* 若 `chroma_db/` 为空且 `data/` 目录下有 PDF，启动时系统会自动加载并索引这些文档。
-* 若需要上传当前会话临时文档，请使用侧边栏的“会话临时文件”上传功能（支持最多 3 个文件），上传成功后将显示已加载的文件名列表。
+👉 **[Windows / macOS 本地启动指南](./doc/startup.md)**
 
 ---
 ## 🧭 使用指南
@@ -163,7 +133,7 @@ streamlit run app.py
 | 最大上下文 Token 数 | 触发历史压缩的阈值 | 6000 |
 | 压缩目标比例 | 压缩后 Token 降至 最大Token × 此比例 | 0.6 |
 | ReAct 触发关键词 | 启用多步推理的关键词列表 | 对比,分析,为什么,如何,总结,评价,比较,区别,影响,解析,解读,解释,研究 |
-| 模型名称 | 智谱 BigModel 系列模型 | glm-4-flash |
+| 模型名称 | 智谱 BigModel 系列模型 | glm-4.7-flash |
 
 ## 📦 依赖清单
 核心依赖见 requirements.txt，主要包含：
