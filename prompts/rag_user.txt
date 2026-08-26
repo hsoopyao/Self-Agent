@@ -1,0 +1,4 @@
+参考资料：
+{context}
+
+用户问题：{question}
