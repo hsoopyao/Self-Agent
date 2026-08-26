@@ -63,6 +63,7 @@ self-agent/
 │   ├── pages/                   # 独立页面
 │   │   ├── knowledges.py        # 文档管理页面
 │   │   └── settings.py          # 设置页面（调优参数）
+│   ├── theme.py                 # 浅色/深色主题与 ReAct 卡片样式
 │   ├── vectorstore.py           # ChromaDB 向量库操作
 │   ├── load_docs.py             # 文档加载与切分
 │   ├── rag_chain.py             # RAG 生成链
