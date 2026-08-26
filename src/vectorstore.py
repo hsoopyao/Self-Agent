@@ -15,7 +15,7 @@ from src.load_docs import load_and_chunk_documents
 
 # ---------- 常量配置 ----------
 PERSIST_DIR = "./chroma_db"
-EMBEDDING_MODEL_NAME = "D:/Project/bge-small-zh-v1.5/models/BAAI--bge-small-zh-v1.5/snapshots/master"
+EMBEDDING_MODEL_NAME = "BAAI/bge-small-zh-v1.5"     #自动下载
 
 # ---------- 全局单例 ----------
 _vectorstore = None
