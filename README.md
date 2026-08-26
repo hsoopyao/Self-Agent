@@ -107,7 +107,7 @@ TAVILY_API_KEY=your_tavily_key_here
 streamlit run app.py
 ```
 
-浏览器将自动打开 http://localhost:8501，即可使用。
+浏览器将自动打开 `http://localhost:8501`，即可使用。
 
 ### 4. 首次启动行为
 * 若 `chroma_db/` 为空且 `data/` 目录下有 PDF，启动时系统会自动加载并索引这些文档。
