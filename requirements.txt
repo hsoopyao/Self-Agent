@@ -12,6 +12,7 @@ chromadb>=1.5.0
 sentence-transformers>=6.0.0
 transformers>=5.15.0
 torch>=2.0.0  # required by sentence-transformers
+torchvision>=0.28.0,<0.29.0
 huggingface_hub>=1.28.0
 
 # Web UI & utils
