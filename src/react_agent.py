@@ -229,6 +229,7 @@ def react_agent(user_input: str, history: List[Dict[str, str]]) -> Generator[str
 
     max_steps = 5
     step = 0
+    executed_actions = set()
     while step < max_steps:
         step += 1
         try:
@@ -250,6 +251,16 @@ def react_agent(user_input: str, history: List[Dict[str, str]]) -> Generator[str
                 tool_input = data["action_input"]
                 thought = data.get("thought", "")
                 yield f"[THOUGHT]💭 思考: {thought}"
+
+                normalized_input = re.sub(r"\s+", " ", str(tool_input)).strip()
+                action_signature = (str(tool_name).strip(), normalized_input)
+                if action_signature in executed_actions:
+                    yield "[OBSERVATION]📊 已跳过相同工具和参数的重复调用，请基于已有结果回答。"
+                    messages.append(AIMessage(content=content))
+                    messages.append(HumanMessage(content="该工具和参数已经执行过。不要重复调用，请基于已有观察结果输出 final_answer。"))
+                    continue
+
+                executed_actions.add(action_signature)
                 yield f"[ACTION]🔧 调用工具：{tool_name}，参数：{tool_input}"
 
                 # 执行工具，获取 (摘要, 出处, 完整内容)
