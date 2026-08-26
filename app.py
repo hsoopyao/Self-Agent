@@ -77,7 +77,7 @@ DEFAULT_CONFIG = {
     "config_max_tokens": 6000,
     "config_target_ratio": 0.6,
     "config_complex_keywords": "对比,分析,为什么,如何,总结,评价,比较,区别,影响,解析,解读,解释,研究",
-    "config_model_name": "glm-5.3",
+    "config_model_name": st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4.7-flash")),
 }
 for key, default_val in DEFAULT_CONFIG.items():
     if key not in st.session_state:

@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 API_KEY = os.getenv("BIGMODEL_API_KEY")
-LLM_MODEL = st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4-flash"))
+LLM_MODEL = st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4.7-flash"))
 BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 
 if not API_KEY:

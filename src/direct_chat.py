@@ -7,7 +7,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 load_dotenv()
 llm = ChatOpenAI(
-    model=st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4-flash")),
+    model=st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4.7-flash")),
     api_key=os.getenv("BIGMODEL_API_KEY"),
     base_url="https://open.bigmodel.cn/api/paas/v4/",
     temperature=0.7,
@@ -56,7 +56,7 @@ def direct_chat_sync(question: str, history: list = None) -> str:
     from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
     import os
     llm = ChatOpenAI(
-        model=st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4-flash")),
+        model=st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4.7-flash")),
         api_key=os.getenv("BIGMODEL_API_KEY"),
         base_url="https://open.bigmodel.cn/api/paas/v4/",
         temperature=0.7,

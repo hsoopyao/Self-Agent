@@ -15,7 +15,7 @@ load_dotenv()
 
 # 智谱 BigModel 配置
 API_KEY = os.getenv("BIGMODEL_API_KEY")
-LLM_MODEL = st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4-flash"))
+LLM_MODEL = st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4.7-flash"))
 if not API_KEY:
     raise ValueError("❌ 未找到 BIGMODEL_API_KEY，请检查 .env 文件。")
 BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"

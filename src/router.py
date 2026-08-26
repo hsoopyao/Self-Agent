@@ -32,7 +32,7 @@ ROUTER_SYSTEM = load_prompt("router_system.txt")
 def route_query(question: str) -> str:
     """返回 'rag' / 'web' """
     llm = ChatOpenAI(
-        model=st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4-flash")),
+        model=st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4.7-flash")),
         api_key=os.getenv("BIGMODEL_API_KEY"),
         base_url="https://open.bigmodel.cn/api/paas/v4/",
         temperature=0.1,

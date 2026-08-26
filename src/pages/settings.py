@@ -1,5 +1,6 @@
 import streamlit as st
 import time
+import os
 
 st.set_page_config(page_title="设置", layout="centered")
 st.title("⚙️ 设置")
@@ -11,7 +12,7 @@ DEFAULT_CONFIG = {
     "config_max_tokens": 6000,
     "config_target_ratio": 0.6,
     "config_complex_keywords": "对比,分析,为什么,如何,总结,评价,比较,区别,影响,解析,解读,解释,研究",
-    "config_model_name": "glm-5.3",
+    "config_model_name": st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4.7-flash")),
 }
 
 for key, default_value in DEFAULT_CONFIG.items():
@@ -73,7 +74,7 @@ with st.form("settings_form"):
     model_name = st.text_input(
         "模型名称",
         value=st.session_state.config_model_name,
-        help="支持智谱 BigModel 系列，如 glm-4-flash, glm-4, glm-5 等"
+        help="支持智谱 BigModel 系列，如 glm-4.7-flash, glm-4, glm-5 等"
     )
 
     # 提交按钮
