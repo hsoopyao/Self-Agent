@@ -1,6 +1,8 @@
 """
 通用对话模块：处理非内部知识的问题，支持联网搜索（流式）。
 """
+import concurrent.futures
+
 from langchain_community.tools import TavilySearchResults
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
@@ -31,14 +33,25 @@ def search(query: str) -> str:
         raise e
 
 def search_with_timeout(query, timeout=2):
-    """2秒超时的搜索，超时返回 None"""
+    """
+    带有超时控制的搜索。
+    如果超时或失败，返回 None。
+    """
     try:
-        results = tavily_tool.invoke({"query": query})
-        if not results:
-            return None
-        return "\n".join([f"{item['title']}: {item['content']}" for item in results])
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(tavily_tool.invoke, {"query": query})
+            try:
+                results = future.result(timeout=timeout)
+                if not results:
+                    return None
+                # 根据实际返回的数据结构调整
+                return "\n".join([f"{item['title']}: {item['content']}" for item in results])
+            except concurrent.futures.TimeoutError:
+                # 超时，取消任务并返回 None
+                future.cancel()
+                return None
     except Exception:
-        return None  # 任何异常都视为搜索失败
+        return None
 
 def general_chat_stream(question: str, history: list = None):
     try:

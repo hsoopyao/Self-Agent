@@ -27,7 +27,6 @@ def init_config():
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def load_prompt(filename):
-    print(PROJECT_ROOT)
     path = os.path.join(PROJECT_ROOT, "prompts", filename)
     with open(path, "r", encoding="utf-8") as f:
         return f.read().strip()
