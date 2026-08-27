@@ -2,7 +2,7 @@ import streamlit as st
 
 from src.core.config import INTRODUCE
 from src.core.context_manager import count_tokens
-from src.retrieval.vectorstore import chunk_file_from_bytes, create_temp_vectorstore
+from src.retrieval.vectorstore import chunk_file_from_bytes, create_temp_vectorstore, delete_temp_file_by_filename
 
 def update_token_display():
     """更新 Token 显示（使用 session_state 中的容器）"""
@@ -57,19 +57,20 @@ def render_sidebar():
 
         # 只有存在临时文件时才显示清空按钮
         if "temp_filename" in st.session_state:
-            if st.button("🗑️ 清空临时文件", use_container_width=True):
-                if "temp_vectorstore" in st.session_state:
-                    del st.session_state.temp_vectorstore
-                if "temp_filename" in st.session_state:
-                    del st.session_state.temp_filename
-                st.session_state.temp_uploader_key += 1
-                st.rerun()
-
-        if "temp_filename" in st.session_state:
             filenames = st.session_state.temp_filename.split(", ")
             st.write(f"📄 当前临时文件（共 {len(filenames)} 个）：")
-            for name in filenames:
-                st.caption(f"  - {name}")
+            for idx, name in enumerate(filenames):
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    st.caption(f"  - {name}")
+                with col2:
+                    # 每个文件的删除按钮，使用唯一的 key
+                    if st.button("✕", key=f"del_temp_{idx}_{name}"):
+                        if delete_temp_file_by_filename(name):
+                            st.toast(f"已删除临时文件：{name}", icon="🗑️")
+                            st.rerun()  # 刷新
+                        else:
+                            st.toast(f"删除失败：{name}", icon="❌")
         else:
             st.caption("无临时文件")
 

@@ -205,6 +205,32 @@ def delete_document_by_filename(filename: str) -> bool:
         print(f"删除文档失败: {e}")
         return False
 
+def delete_temp_file_by_filename(filename: str) -> bool:
+    """
+    从临时向量库中删除指定文件名的所有文档块。
+    返回是否成功。
+    """
+    import streamlit as st
+    temp_vs = st.session_state.get("temp_vectorstore")
+    if temp_vs is None:
+        return False
+
+    collection = temp_vs._collection
+    # 删除 where filename == filename
+    collection.delete(where={"filename": filename})
+
+    # 更新 session_state 中的文件名列表
+    if "temp_filename" in st.session_state:
+        filenames = [f.strip() for f in st.session_state.temp_filename.split(",")]
+        filenames = [f for f in filenames if f != filename]
+        if filenames:
+            st.session_state.temp_filename = ", ".join(filenames)
+        else:
+            # 如果删除后没有文件了，清除临时向量库和文件名
+            del st.session_state.temp_vectorstore
+            del st.session_state.temp_filename
+    return True
+
 def add_documents_to_store(docs: List[Document]) -> bool:
     try:
         vectorstore = get_vectorstore()
