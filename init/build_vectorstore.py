@@ -8,7 +8,7 @@ import os
 # 将当前目录加入 sys.path，确保可以导入 src 包
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.vectorstore import create_vectorstore
+from retrieval.vectorstore import create_vectorstore
 
 if __name__ == "__main__":
     print("开始构建向量数据库...")

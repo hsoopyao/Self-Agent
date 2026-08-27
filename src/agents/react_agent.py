@@ -1,0 +1,285 @@
+import json
+import re
+import time
+import streamlit as st
+from typing import Generator, List, Dict, Tuple
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+
+from src.retrieval.vectorstore import search_with_score
+from src.chat.direct_chat import direct_chat_sync
+from src.core.llm_client import get_llm
+from src.core.config import load_prompt
+from src.chat.general_chat import tavily_tool
+
+# ---------- 辅助函数：提取摘要 ----------
+def _summarize_text(text: str, max_sentences: int = 2) -> str:
+    """取前 max_sentences 句话作为摘要（按句号、问号、感叹号分隔）"""
+    if not text:
+        return ""
+    # 按中文/英文标点切分句子
+    sentences = re.split(r'[。！？.!?]', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    summary = "。".join(sentences[:max_sentences])
+    if len(sentences) > max_sentences:
+        summary += "……"
+    return summary
+
+# ---------- 工具函数 ----------
+def execute_rag(query: str) -> Tuple[str, str, str]:
+    """执行内部知识检索，返回 (摘要, 出处, 完整内容)"""
+    has_match, docs, score = search_with_score(query, k=4, score_threshold=0.0)
+    if not has_match or not docs:
+        return "未找到相关信息", "", ""
+
+    first_doc = docs[0]
+    full_text = first_doc.page_content
+    # 提取与查询相关的片段作为摘要
+    summary = extract_relevant_snippets(full_text, query, max_sentences=3)
+    source = first_doc.metadata.get("filename", "未知文档")
+    full_content = "\n---\n".join([doc.page_content for doc in docs[:3]])
+    return summary, f"📄 {source}", full_content
+
+
+def execute_web(query: str) -> Tuple[str, str, str]:
+    """执行联网搜索，返回 (摘要, 出处文本（含链接）, 完整内容)"""
+    try:
+        results = tavily_tool.invoke({"query": query})
+        if not results:
+            return "未搜索到相关信息", "", ""
+
+        first = results[0]
+        title = first.get("title", "未知标题")
+        content = first.get("content", "")
+        url = first.get("url", "")
+
+        # 摘要：提取与查询相关的片段
+        summary = extract_relevant_snippets(content, query, max_sentences=3)
+        # 出处：生成 HTML 可点击链接（如果 URL 存在）
+        if url:
+            # 注意转义 title 中的特殊字符，避免破坏 HTML
+            safe_title = title.replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
+            source = f'<a href="{url}" target="_blank">{safe_title}</a>'
+        else:
+            source = title
+
+        full_parts = []
+        for i, res in enumerate(results[:5], 1):
+            full_parts.append(f"【结果 {i}】{res.get('title', '')}\n{res.get('content', '')}\n来源：{res.get('url', '')}")
+        full_content = "\n\n".join(full_parts)
+        return summary, source, full_content
+    except Exception as e:
+        print(f"execute_web 出错: {e}")
+        return f"搜索出错：{str(e)}", "", ""
+
+def execute_chat(query: str) -> str:
+    """直接对话，不依赖外部信息（返回完整回答）"""
+    return direct_chat_sync(query)
+
+def call_tool(tool_name: str, query: str) -> Tuple[str, str, str]:
+    """
+    统一调用工具，返回 (摘要, 出处, 完整内容)
+    """
+    print(f"执行工具: {tool_name}")
+    if tool_name == "rag_search":
+        return execute_rag(query)
+    elif tool_name == "web_search":
+        return execute_web(query)
+    elif tool_name == "direct_chat":
+        # direct_chat 直接返回回答，摘要和出处留空
+        answer = execute_chat(query)
+        return answer, "", ""
+    else:
+        return f"未知工具: {tool_name}", "", ""
+
+# ---------- 解析 LLM 响应的辅助函数 ----------
+def extract_json(content: str):
+    """
+    从 LLM 响应中提取 JSON 对象，支持多种常见格式。
+    返回解析后的字典，如果失败则返回 None。
+    """
+    # 1. 尝试直接解析
+    try:
+        return json.loads(content)
+    except:
+        pass
+
+    # 2. 尝试提取 JSON 代码块
+    code_block_match = re.search(r'```json\s*(\{.*?\})\s*```', content, re.DOTALL)
+    if code_block_match:
+        try:
+            return json.loads(code_block_match.group(1))
+        except:
+            pass
+
+    # 3. 尝试用栈匹配完整的顶级 JSON 对象
+    start = content.find('{')
+    if start != -1:
+        brace_count = 0
+        in_string = False
+        escape_next = False
+        for i in range(start, len(content)):
+            ch = content[i]
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == '\\':
+                escape_next = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if not in_string:
+                if ch == '{':
+                    brace_count += 1
+                elif ch == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_str = content[start:i+1]
+                        try:
+                            return json.loads(json_str)
+                        except:
+                            break
+
+    # 4. 尝试提取 final_answer（当 JSON 解析失败时）
+    # 如果响应中包含 "final_answer"，尝试用正则提取
+    match = re.search(r'"final_answer"\s*:\s*"([^"]*)"', content, re.DOTALL)
+    if match:
+        final_answer = match.group(1)
+        final_answer = final_answer.replace('\\n', '\n').replace('\\"', '"')
+        return {"final_answer": final_answer}
+
+    # 5. 尝试修复常见格式问题
+    fixed = content
+    fixed = re.sub(r"'([^'\\]*(?:\\.[^'\\]*)*)'", r'"\1"', fixed)
+    fixed = re.sub(r',\s*}', '}', fixed)
+    fixed = re.sub(r',\s*]', ']', fixed)
+    try:
+        return json.loads(fixed)
+    except:
+        pass
+
+    return None
+
+# ---------- 提取与查询相关的片段 ----------
+def extract_relevant_snippets(text: str, query: str, max_sentences: int = 4) -> str:
+    """
+    从文本中提取与查询最相关的片段（基于关键词命中数量）。
+    如果找不到相关片段，则返回开头几句。
+    """
+    if not text:
+        return ""
+
+    # 按句子分割
+    sentences = re.split(r'[。！？.!?]', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    # 提取查询关键词（分词）
+    keywords = set(re.findall(r'[\u4e00-\u9fa5a-zA-Z0-9]+', query))
+    if not keywords:
+        # 没有关键词，返回前 max_sentences 句
+        return "。".join(sentences[:max_sentences])
+
+    # 计算每个句子的关键词命中数
+    scored_sentences = []
+    for sent in sentences:
+        score = sum(1 for kw in keywords if kw in sent)
+        scored_sentences.append((score, sent))
+
+    # 按分数排序，取最高的几句
+    scored_sentences.sort(key=lambda x: x[0], reverse=True)
+    top_sentences = [s for _, s in scored_sentences[:max_sentences]]
+
+    # 如果最高分为0，说明没有任何关键词命中，返回开头几句
+    if scored_sentences[0][0] == 0:
+        return "。".join(sentences[:max_sentences])
+
+    return "。".join(top_sentences)
+
+# ---------- ReAct 提示词 ----------
+REACT_SYSTEM = load_prompt("react_system.txt")
+
+# ---------- ReAct 主循环 ----------
+def react_agent(user_input: str, history: List[Dict[str, str]]) -> Generator[str, None, None]:
+    """
+    ReAct 循环，生成最终回答（流式输出）。
+    每次 yield 一段文本（思考、工具调用、观察、最终答案）。
+    """
+    llm=get_llm(streaming=False, temperature=0.1)
+    messages = [SystemMessage(content=REACT_SYSTEM)]
+    # 添加历史
+    for msg in history:
+        if msg["role"] == "user":
+            messages.append(HumanMessage(content=msg["content"]))
+        elif msg["role"] == "assistant":
+            messages.append(AIMessage(content=msg["content"]))
+    # 当前用户问题
+    messages.append(HumanMessage(content=user_input))
+
+    max_steps = 5
+    step = 0
+    executed_actions = set()
+    while step < max_steps:
+        step += 1
+        try:
+            response = llm.invoke(messages, max_tokens=4096)
+            content = response.content.strip()
+            data = extract_json(content)
+            if data is None:
+                yield f"[FINAL]（抱歉，我无法按标准格式输出，以下是直接回答：）{content}"
+                return
+
+            if "final_answer" in data:
+                final_text = data["final_answer"]
+                for char in final_text:
+                    yield f"[FINAL]{char}"
+                    time.sleep(0.02)
+                return
+            elif "action" in data and "action_input" in data:
+                tool_name = data["action"]
+                tool_input = data["action_input"]
+                thought = data.get("thought", "")
+                yield f"[THOUGHT]💭 思考: {thought}"
+
+                normalized_input = re.sub(r"\s+", " ", str(tool_input)).strip()
+                action_signature = (str(tool_name).strip(), normalized_input)
+                if action_signature in executed_actions:
+                    yield "[OBSERVATION]📊 已跳过相同工具和参数的重复调用，请基于已有结果回答。"
+                    messages.append(AIMessage(content=content))
+                    messages.append(HumanMessage(content="该工具和参数已经执行过。不要重复调用，请基于已有观察结果输出 final_answer。"))
+                    continue
+
+                executed_actions.add(action_signature)
+                yield f"[ACTION]🔧 调用工具：{tool_name}，参数：{tool_input}"
+
+                # 执行工具，获取 (摘要, 出处, 完整内容)
+                summary, source, full_content = call_tool(tool_name, tool_input)
+                # 显示观察结果（摘要 + 出处）
+                if source:
+                    yield f"[OBSERVATION]📊 观察结果：{summary} （出处：{source}）"
+                else:
+                    yield f"[OBSERVATION]📊 观察结果：{summary}"
+
+                # 将完整内容存入 session_state，供预览使用
+                if "observation_details" not in st.session_state:
+                    st.session_state.observation_details = []
+                st.session_state.observation_details.append({
+                    "summary": summary,
+                    "source": source,
+                    "full": full_content
+                })
+                # 将 assistant 的响应和观察结果加入消息历史
+                messages.append(AIMessage(content=content))
+                # 将摘要 + 完整内容（截断）加入历史，避免循环
+                truncated_full = full_content[:1000] + "..." if len(full_content) > 1000 else full_content
+                messages.append(HumanMessage(content=f"观察结果（摘要）：{summary}\n\n观察结果（完整）：{truncated_full}"))
+            else:
+                yield "[FINAL]抱歉，我无法继续推理，请重试。"
+                return
+        except Exception as e:
+            error_str = str(e)
+            if "contentFilter" in error_str or "1301" in error_str:
+                yield "[FINAL]⚠️ 系统检测到输入或生成内容可能包含不安全或敏感内容，请您避免输入易产生敏感内容的提示语，感谢您的配合。"
+            else:
+                yield f"[FINAL]⚠️ ReAct 循环出错：{error_str}"
+            return
+    yield "[FINAL]⚠️ 超出最大思考步数，请简化问题。"

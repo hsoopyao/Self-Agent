@@ -1,6 +1,7 @@
 # pages/knowledges.py
 import streamlit as st
-from src.vectorstore import list_documents, add_documents_to_store, delete_document_by_filename, chunk_pdf_from_bytes
+
+from src.retrieval.vectorstore import list_documents, add_documents_to_store, delete_document_by_filename, chunk_pdf_from_bytes
 
 def main():
     st.title("📚 知识库")
