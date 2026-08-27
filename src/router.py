@@ -1,9 +1,6 @@
-# src/router.py
-import os
-import streamlit as st
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.tools import tool
+from src.llm_client import get_llm
 
 @tool
 def rag_search(query: str) -> str:
@@ -31,12 +28,7 @@ ROUTER_SYSTEM = load_prompt("router_system.txt")
 
 def route_query(question: str) -> str:
     """返回 'rag' / 'web' """
-    llm = ChatOpenAI(
-        model=st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4.7-flash")),
-        api_key=os.getenv("BIGMODEL_API_KEY"),
-        base_url="https://open.bigmodel.cn/api/paas/v4/",
-        temperature=0.1,
-    )
+    llm = get_llm(streaming=False, temperature=0.1)
     # 绑定工具
     llm_with_tools = llm.bind_tools(tools)
     messages = [

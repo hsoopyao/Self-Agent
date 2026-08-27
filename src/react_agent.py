@@ -1,15 +1,13 @@
 import json
-import os
 import re
 import time
 import streamlit as st
 from typing import Generator, List, Dict, Tuple
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from src.vectorstore import search_with_score
-from src.general_chat import search_with_timeout
 from src.direct_chat import direct_chat_sync
+from src.llm_client import get_llm
 
 # ---------- 辅助函数：提取摘要 ----------
 def _summarize_text(text: str, max_sentences: int = 2) -> str:
@@ -211,12 +209,7 @@ def react_agent(user_input: str, history: List[Dict[str, str]]) -> Generator[str
     ReAct 循环，生成最终回答（流式输出）。
     每次 yield 一段文本（思考、工具调用、观察、最终答案）。
     """
-    llm = ChatOpenAI(
-        model=st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4.7-flash")),
-        api_key=os.getenv("BIGMODEL_API_KEY"),
-        base_url="https://open.bigmodel.cn/api/paas/v4/",
-        temperature=0.1,
-    )
+    llm=get_llm(streaming=False, temperature=0.1)
     messages = [SystemMessage(content=REACT_SYSTEM)]
     # 添加历史
     for msg in history:

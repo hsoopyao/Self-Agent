@@ -1,18 +1,8 @@
-# src/direct_chat.py
-import os
 import streamlit as st
-from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from src.llm_client import get_llm
 
-load_dotenv()
-llm = ChatOpenAI(
-    model=st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4.7-flash")),
-    api_key=os.getenv("BIGMODEL_API_KEY"),
-    base_url="https://open.bigmodel.cn/api/paas/v4/",
-    temperature=0.7,
-    streaming=True,
-)
+llm = get_llm(streaming=True, temperature=0.7)
 
 DIRECT_SYSTEM = "你是一个友好的个人助手，名字叫卡卡西。请用口语化、亲切的语气回答用户的闲聊和一般性问题，无需使用外部信息。"
 

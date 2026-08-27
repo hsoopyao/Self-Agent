@@ -1,46 +1,20 @@
 """
 通用对话模块：处理非内部知识的问题，支持联网搜索（流式）。
 """
-import os
-import streamlit as st
-import requests
-from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
-from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_community.tools import TavilySearchResults
-from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-
-load_dotenv()
-
-# 智谱 BigModel 配置
-API_KEY = os.getenv("BIGMODEL_API_KEY")
-LLM_MODEL = st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4.7-flash"))
-if not API_KEY:
-    raise ValueError("❌ 未找到 BIGMODEL_API_KEY，请检查 .env 文件。")
-BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
+from src.llm_client import get_llm
 
 # 加载 Prompt
 def load_prompt(filename):
     with open(f"prompts/{filename}", "r", encoding="utf-8") as f:
         return f.read().strip()
-    return None
 
 GENERAL_SYSTEM = load_prompt("general_system.txt")
 GENERAL_USER_TEMPLATE = load_prompt("general_user.txt")
 
-# 初始化 LLM（流式）
-llm = ChatOpenAI(
-    model=LLM_MODEL,
-    api_key=API_KEY,
-    base_url=BASE_URL,
-    temperature=0.7,
-    streaming=True,
-)
-
-# 初始化搜索引擎（设置超时）
-# wrapper = DuckDuckGoSearchAPIWrapper()
-# search = DuckDuckGoSearchRun(api_wrapper=wrapper)
+# 1. 初始化 LLM（流式）
+llm = get_llm(streaming=True, temperature=0.7)
 
 # 2. 初始化 Tavily 搜索引擎
 tavily_tool = TavilySearchResults(

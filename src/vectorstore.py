@@ -1,9 +1,7 @@
-import sys
 import os
 import tempfile
 import uuid
 from typing import List, Dict
-import streamlit as st
 
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
