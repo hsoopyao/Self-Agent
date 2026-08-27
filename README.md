@@ -38,39 +38,36 @@
 ## 🏗️ 项目结构
 ```md
 self-agent/
-├── app.py                       # 主入口，包含导航和聊天界面
-├── .env                         # 环境变量（API Key 等，需自行创建）
-├── chroma_db/                   # 向量数据库持久化目录（自动生成）
-├── data/                        # 启动时自动加载的 PDF（示例文档）
-├── doc/                         # 文档
-│   ├── startup.md               # Windows / macOS 启动指南
-│   └── update.md                # 更新日志
-├── init/                        # 初始化脚本
-│   ├── build_vectorstore.py     # 构建向量数据库
-│   ├── download_model.py        # 下载 BGE 检索增强模型
-│   └── generate_sample.py       # 生成测试 PDF 文件
-├── prompts/                     # 提示词模板
-│   ├── general_system.txt
-│   ├── general_user.txt
-│   ├── rag_system.txt
-│   ├── rag_user.txt
-│   ├── react_system.txt
-│   └── router_system.txt
+├── app.py                         # 主入口，包含导航和聊天界面
+├── .env                           # 环境变量（API Key 等，需自行创建）
+├── chroma_db/                     # 向量数据库持久化目录（自动生成）
+├── data/                          # 启动时自动加载的 PDF（示例文档）
+├── init/                          # 初始化文件
+├── doc/                           # 文档
 ├── src/
-│   ├── pages/                   # 独立页面
-│   │   ├── knowledges.py        # 文档管理页面
-│   │   └── settings.py          # 设置页面（调优参数）
-│   ├── vectorstore.py           # ChromaDB 向量库操作
-│   ├── load_docs.py             # 文档加载与切分
-│   ├── rag_chain.py             # RAG 生成链
-│   ├── general_chat.py          # 联网搜索 + 通用对话
-│   ├── llm_client.py            # llm统一获取入口
-│   ├── direct_chat.py           # 纯闲聊
-│   ├── router.py                # 意图路由
-│   ├── react_agent.py           # ReAct 多步推理
-│   └── context_manager.py       # Token 计数与历史压缩
-├── requirements.txt             # Python 依赖
-└── README.md                    # 项目说明
+│   ├── core/                      # 核心配置与工具
+│   │   ├── config.py              # 常量、默认配置、初始化
+│   │   ├── context_manager.py     # Token 计数与历史压缩
+│   │   └── llm_client.py          # LLM 统一工厂函数
+│   ├── retrieval/                 # 检索与向量库
+│   │   ├── vectorstore.py         # ChromaDB 操作
+│   │   ├── load_docs.py           # 文档加载与切分
+│   │   └── rag_chain.py           # RAG 生成链
+│   ├── agents/                    # 路由与推理
+│   │   ├── router.py              # 意图路由
+│   │   └── react_agent.py         # ReAct 多步推理
+│   ├── chat/                      # 对话模块
+│   │   ├── general_chat.py        # 联网搜索 + 通用对话
+│   │   └── direct_chat.py         # 纯闲聊
+│   ├── ui/                        # UI 组件（不包含页面）
+│   │   ├── components.py          # 卡片渲染函数
+│   │   └── sidebar.py             # 侧边栏逻辑
+│   └── pages/                     # 独立页面（保持原样，供 st.Page 引用）
+│       ├── chat.py                # 聊天页面（原 chat_page 函数移入）
+│       ├── knowledges.py          # 文档管理页面
+│       └── settings.py            # 设置页面
+├── requirements.txt               # Python 依赖
+└── README.md                      # 项目说明
 ```
 
 ---
@@ -84,7 +81,7 @@ self-agent/
 ---
 ## 🧭 使用指南
 ### 主界面（聊天）
-* 顶部导航栏可在 “聊天” 和 “知识库” 页面间切换。
+* 顶部导航栏可在 “聊天” ， “知识库”和 “设置” 页面间切换。
 * 侧边栏： 
   * 清空上下文窗口：重置当前会话历史。 
   * Token 实时显示：查看当前会话 Token 使用情况，超过阈值会触发上下文压缩机制。 
