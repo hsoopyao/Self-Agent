@@ -1,11 +1,31 @@
 # src/llm_client.py
 import os
+
 import streamlit as st
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
 # 在模块加载时加载环境变量
 load_dotenv()
+
+
+def _get_float_env(name: str, default: float) -> float:
+    """读取正数浮点配置，非法值回退到默认值。"""
+    try:
+        value = float(os.getenv(name, str(default)))
+        return value if value > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _get_int_env(name: str, default: int) -> int:
+    """读取非负整数配置，非法值回退到默认值。"""
+    try:
+        value = int(os.getenv(name, str(default)))
+        return value if value >= 0 else default
+    except (TypeError, ValueError):
+        return default
+
 
 def get_llm(streaming: bool = True, temperature: float = 0.7, **kwargs):
     """
@@ -28,6 +48,10 @@ def get_llm(streaming: bool = True, temperature: float = 0.7, **kwargs):
         "config_model_name",
         os.getenv("MODEL_NAME", "glm-4.7-flash")
     )
+
+    # 所有聊天链路使用同一套默认网络策略，同时允许调用方按需覆盖。
+    kwargs.setdefault("timeout", _get_float_env("LLM_REQUEST_TIMEOUT", 60.0))
+    kwargs.setdefault("max_retries", _get_int_env("LLM_MAX_RETRIES", 2))
 
     return ChatOpenAI(
         model=model_name,

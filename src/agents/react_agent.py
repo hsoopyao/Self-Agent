@@ -1,6 +1,5 @@
 import json
 import re
-import time
 import streamlit as st
 from typing import Generator, List, Dict, Tuple
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
@@ -9,7 +8,7 @@ from src.retrieval.vectorstore import search_with_score
 from src.chat.direct_chat import direct_chat_sync
 from src.core.llm_client import get_llm
 from src.core.config import load_prompt
-from src.chat.general_chat import tavily_tool
+from src.chat.general_chat import search_results
 
 # ---------- 辅助函数：提取摘要 ----------
 def _summarize_text(text: str, max_sentences: int = 2) -> str:
@@ -43,7 +42,7 @@ def execute_rag(query: str) -> Tuple[str, str, str]:
 def execute_web(query: str) -> Tuple[str, str, str]:
     """执行联网搜索，返回 (摘要, 出处文本（含链接）, 完整内容)"""
     try:
-        results = tavily_tool.invoke({"query": query})
+        results = search_results(query)
         if not results:
             return "未搜索到相关信息", "", ""
 
@@ -80,7 +79,7 @@ def execute_chat(query: str) -> str:
     """直接对话，不依赖外部信息（返回完整回答）"""
     return direct_chat_sync(query)
 
-def call_tool(tool_name: str, query: str) -> Tuple[str, str, str]:
+def call_tool(tool_name: str, query: str, allow_web: bool = True) -> Tuple[str, str, str]:
     """
     统一调用工具，返回 (摘要, 出处, 完整内容)
     """
@@ -88,6 +87,8 @@ def call_tool(tool_name: str, query: str) -> Tuple[str, str, str]:
     if tool_name == "rag_search":
         return execute_rag(query)
     elif tool_name == "web_search":
+        if not allow_web:
+            return "未获得联网搜索授权，已阻止发送查询。", "", ""
         return execute_web(query)
     elif tool_name == "direct_chat":
         # direct_chat 直接返回回答，摘要和出处留空
@@ -204,13 +205,20 @@ def extract_relevant_snippets(text: str, query: str, max_sentences: int = 4) -> 
 REACT_SYSTEM = load_prompt("react_system.txt")
 
 # ---------- ReAct 主循环 ----------
-def react_agent(user_input: str, history: List[Dict[str, str]]) -> Generator[str, None, None]:
+def react_agent(
+    user_input: str,
+    history: List[Dict[str, str]],
+    allow_web: bool = True,
+) -> Generator[str, None, None]:
     """
     ReAct 循环，生成最终回答（流式输出）。
     每次 yield 一段文本（思考、工具调用、观察、最终答案）。
     """
-    llm=get_llm(streaming=False, temperature=0.1)
-    messages = [SystemMessage(content=REACT_SYSTEM)]
+    llm = get_llm(streaming=False, temperature=0.1)
+    system_prompt = REACT_SYSTEM
+    if not allow_web:
+        system_prompt += "\n本次对话未获得联网授权，禁止调用 web_search；仅可使用内部知识库或直接回答。"
+    messages = [SystemMessage(content=system_prompt)]
     # 添加历史
     for msg in history:
         if msg["role"] == "user":
@@ -235,9 +243,7 @@ def react_agent(user_input: str, history: List[Dict[str, str]]) -> Generator[str
 
             if "final_answer" in data:
                 final_text = data["final_answer"]
-                for char in final_text:
-                    yield f"[FINAL]{char}"
-                    time.sleep(0.02)
+                yield f"[FINAL]{final_text}"
                 return
             elif "action" in data and "action_input" in data:
                 tool_name = data["action"]
@@ -257,7 +263,11 @@ def react_agent(user_input: str, history: List[Dict[str, str]]) -> Generator[str
                 yield f"[ACTION]🔧 调用工具：{tool_name}，参数：{tool_input}"
 
                 # 执行工具，获取 (摘要, 出处, 完整内容)
-                summary, source, full_content = call_tool(tool_name, tool_input)
+                summary, source, full_content = call_tool(
+                    tool_name,
+                    tool_input,
+                    allow_web=allow_web,
+                )
                 # 显示观察结果（摘要 + 出处）
                 if source:
                     yield f"[OBSERVATION]📊 观察结果：{summary} （出处：{source}）"
@@ -291,4 +301,5 @@ def react_agent(user_input: str, history: List[Dict[str, str]]) -> Generator[str
                 yield "[FINAL]⚠️ 系统检测到输入或生成内容可能包含不安全或敏感内容，请您避免输入易产生敏感内容的提示语，感谢您的配合。"
             else:
                 yield "[FINAL]⚠️ 处理请求时出现内部错误，请稍后重试。"
+            return
     yield "[FINAL]⚠️ 超出最大思考步数，请简化问题。"
