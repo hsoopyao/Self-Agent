@@ -1,4 +1,5 @@
 # ========== 定义聊天页面 ==========
+import logger
 import streamlit as st
 
 from src.core.context_manager import count_tokens, trim_history
@@ -34,7 +35,7 @@ def chat_page():
 
 
     if user_input := st.chat_input("请输入您的问题..."):
-        st.session_state.messages.append({"role": "user", "content": user_input})
+        # st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
             st.markdown(user_input)
 
@@ -186,8 +187,13 @@ def chat_page():
                 # 回答完成后更新 token 使用数量
                 update_token_display()
 
+
             except Exception as e:
-                st.error(f"请求出错：{str(e)}")
+                # 记录详细错误日志
                 import traceback
-                st.code(traceback.format_exc())
-                st.session_state.messages.append({"role": "assistant", "content": "抱歉，发生错误。"})
+                error_details = traceback.format_exc()
+                logger.error(f"聊天页面发生错误: {error_details}")
+                # 用户友好提示
+                st.error("⚠️ 处理请求时出现意外错误，请稍后重试。")
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": "抱歉，我暂时无法处理您的请求，请稍后再试。"})

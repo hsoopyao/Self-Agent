@@ -83,4 +83,9 @@ def general_chat_stream(question: str, history: list = None):
         if not has_chunk:
             yield "（未能生成回答，请稍后重试）"
     except Exception as e:
-        yield f"⚠️ 生成回答时出错：{str(e)}"
+        # 记录日志
+        import logging, traceback
+        logger = logging.getLogger(__name__)
+        logger.error(f"ReAct 循环出错: {traceback.format_exc()}")
+        # 用户友好提示
+        yield "⚠️ 处理请求时出现内部错误，请稍后重试。"

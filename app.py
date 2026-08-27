@@ -1,5 +1,6 @@
 import os
 import sys
+import logging
 import streamlit as st
 
 from src.core.config import init_config
@@ -8,9 +9,14 @@ from src.pages.chats import chat_page
 from src.retrieval.vectorstore import get_vectorstore
 from src.ui.sidebar import render_sidebar
 from src.ui.ui_components import apply_theme
+from src.core.logging_config import setup_logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 st.set_page_config(page_title="智能助手", layout="centered")
+
+# 初始化日志
+setup_logging()
+logger = logging.getLogger(__name__)
 
 # 初始化配置与React卡片主题
 init_config()

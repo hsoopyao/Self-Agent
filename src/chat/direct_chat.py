@@ -38,7 +38,11 @@ def direct_chat_stream(question: str, history: list = None):
         for chunk in llm.stream(messages):
             yield chunk.content
     except Exception as e:
-        yield f"⚠️ 生成回答时出错：{str(e)}"
+        import logging, traceback
+        logger = logging.getLogger(__name__)
+        logger.error(f"ReAct 循环出错: {traceback.format_exc()}")
+        # 用户友好提示
+        yield "⚠️ 处理请求时出现内部错误，请稍后重试。"
 
 # 同步版本，非流式
 def direct_chat_sync(question: str, history: list = None) -> str:

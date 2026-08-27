@@ -69,7 +69,12 @@ def execute_web(query: str) -> Tuple[str, str, str]:
         return summary, source, full_content
     except Exception as e:
         print(f"execute_web 出错: {e}")
-        return f"搜索出错：{str(e)}", "", ""
+        # 记录日志
+        import logging, traceback
+        logger = logging.getLogger(__name__)
+        logger.error(f"ReAct 循环出错: {traceback.format_exc()}")
+        # 用户友好提示
+        return "⚠️ 处理请求时出现内部错误，请稍后重试。", "", ""
 
 def execute_chat(query: str) -> str:
     """直接对话，不依赖外部信息（返回完整回答）"""
@@ -277,9 +282,13 @@ def react_agent(user_input: str, history: List[Dict[str, str]]) -> Generator[str
                 return
         except Exception as e:
             error_str = str(e)
+            # 记录日志
+            import logging, traceback
+            logger = logging.getLogger(__name__)
+            logger.error(f"ReAct 循环出错: {traceback.format_exc()}")
+            # 用户友好提示
             if "contentFilter" in error_str or "1301" in error_str:
                 yield "[FINAL]⚠️ 系统检测到输入或生成内容可能包含不安全或敏感内容，请您避免输入易产生敏感内容的提示语，感谢您的配合。"
             else:
-                yield f"[FINAL]⚠️ ReAct 循环出错：{error_str}"
-            return
+                yield "[FINAL]⚠️ 处理请求时出现内部错误，请稍后重试。"
     yield "[FINAL]⚠️ 超出最大思考步数，请简化问题。"

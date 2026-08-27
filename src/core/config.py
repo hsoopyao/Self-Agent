@@ -23,7 +23,7 @@ def init_config():
         if key not in st.session_state:
             st.session_state[key] = default_val
 
-# 确定项目根目录
+# 确定项目根目录,读取 prompt 文件
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def load_prompt(filename):
