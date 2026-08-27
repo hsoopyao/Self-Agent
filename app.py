@@ -13,10 +13,8 @@ from src.general_chat import general_chat_stream
 from src.pages.knowledges import main as knowledge_page
 from src.rag_chain import rag_chain_with_docs
 from src.router import route_query
-from src.theme import GITHUB_URL, apply_theme, get_theme, initialize_theme, toggle_theme
 from src.vectorstore import (
     chunk_file_from_bytes,
-    create_temp_vectorstore,
     get_vectorstore,
     list_documents,
     search_with_score,
@@ -37,9 +35,6 @@ def render_observation(content: str) -> str:
 
 INTRODUCE = "您好！我可以回答内部知识，也能进行常识问答和联网搜索。请问有什么可以帮助您？"
 
-initialize_theme()
-apply_theme()
-
 # 初始化配置（如果 session_state 中没有）
 DEFAULT_CONFIG = {
     "config_score_threshold": 0.5,
@@ -58,17 +53,6 @@ get_vectorstore()
 
 # ========== 全局侧边栏（所有页面共享） ==========
 with st.sidebar:
-    st.markdown("### 🎨 外观与项目")
-    theme_col, github_col = st.columns(2)
-    with theme_col:
-        theme_label = "🌙 深色" if get_theme() == "light" else "☀️ 浅色"
-        if st.button(theme_label, use_container_width=True, key="theme_toggle"):
-            toggle_theme()
-            st.rerun()
-    with github_col:
-        st.link_button("⭐ GitHub", GITHUB_URL, use_container_width=True)
-
-    st.divider()
     st.markdown("### 🧹 会话管理")
     if st.button("🗑️ 清空上下文窗口", use_container_width=True):
         st.session_state.messages = [
@@ -392,9 +376,10 @@ def chat_page():
 page_chat = st.Page(chat_page, title="聊天", icon="💬")
 page_knowledge = st.Page(knowledge_page, title="知识库", icon="📚")
 page_settings = st.Page("src/pages/settings.py", title="设置", icon="⚙️")
+page_github = st.Page("https://github.com/hsoopyao/Self-Agent", title="GitHub", icon="🐙")
 
 # 创建导航（顶部显示）
-pg = st.navigation([page_chat, page_knowledge, page_settings], position="top")
+pg = st.navigation([page_chat, page_knowledge, page_settings, page_github], position="top")
 
 # 运行当前选中的页面
 pg.run()

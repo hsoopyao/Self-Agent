@@ -1,6 +1,6 @@
 # 🤖 Self Agent — 智能文档问答助手
 
-一个基于 **LangChain + ChromaDB + BGE Embedding + GLM-4-Flash** 构建的本地化智能助手，支持**内部知识库检索（RAG）**、**实时联网搜索**、**临时文件解读**和**ReAct 多步推理**，并提供友好的 Streamlit Web 界面。
+一个基于 **LangChain + ChromaDB + BGE Embedding + GLM-4.7-Flash** 构建的本地化智能助手，支持**内部知识库检索（RAG）**、**实时联网搜索**、**临时文件解读**和**ReAct 多步推理**，并提供友好的 Streamlit Web 界面。
 
 ---
 
@@ -26,9 +26,6 @@
 
 - 🎨 **流式输出与可视化思考过程**  
   思考、工具调用、观察结果以不同样式分块显示，最终答案逐字输出，体验流畅。
-
-- 🗂️ **多会话管理**  
-  可同时维护多个独立会话，每个会话拥有独立的对话历史和临时文件（可选）。
 
 - 📊 **Token 实时监控**  
   实时显示当前会话 Token 用量，接近上限时自动触发历史摘要压缩，并提示用户等待。
@@ -63,11 +60,11 @@ self-agent/
 │   ├── pages/                   # 独立页面
 │   │   ├── knowledges.py        # 文档管理页面
 │   │   └── settings.py          # 设置页面（调优参数）
-│   ├── theme.py                 # 浅色/深色主题与 ReAct 卡片样式
 │   ├── vectorstore.py           # ChromaDB 向量库操作
 │   ├── load_docs.py             # 文档加载与切分
 │   ├── rag_chain.py             # RAG 生成链
 │   ├── general_chat.py          # 联网搜索 + 通用对话
+│   ├── llm_client.py            # llm统一获取入口
 │   ├── direct_chat.py           # 纯闲聊
 │   ├── router.py                # 意图路由
 │   ├── react_agent.py           # ReAct 多步推理
