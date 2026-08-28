@@ -1,8 +1,5 @@
-import streamlit as st
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from src.core.llm_client import get_llm
-
-llm = get_llm(streaming=True, temperature=0.7)
 
 DIRECT_SYSTEM = "你是一个友好的个人助手，名字叫卡卡西。请用口语化、亲切的语气回答用户的闲聊和一般性问题，无需使用外部信息。"
 
@@ -35,6 +32,7 @@ def direct_chat_stream(question: str, history: list = None):
 
     # 流式生成
     try:
+        llm = get_llm(streaming=True, temperature=0.7)
         for chunk in llm.stream(messages):
             yield chunk.content
     except Exception as e:
@@ -46,15 +44,7 @@ def direct_chat_stream(question: str, history: list = None):
 
 # 同步版本，非流式
 def direct_chat_sync(question: str, history: list = None) -> str:
-    from langchain_openai import ChatOpenAI
-    from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-    import os
-    llm = ChatOpenAI(
-        model=st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4.7-flash")),
-        api_key=os.getenv("BIGMODEL_API_KEY"),
-        base_url="https://open.bigmodel.cn/api/paas/v4/",
-        temperature=0.7,
-    )
+    llm = get_llm(streaming=False, temperature=0.7)
     messages = [SystemMessage(content="你是一个友好的个人助手，名字叫卡卡西。")]
     if history:
         for msg in history:

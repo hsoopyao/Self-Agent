@@ -1,9 +1,8 @@
-import os
-import streamlit as st
 import tiktoken
 
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
+
+from src.core.llm_client import get_llm
 
 _ENCODER = tiktoken.get_encoding("cl100k_base")
 
@@ -49,12 +48,7 @@ def trim_history(history, max_tokens=6000, target_ratio=0.6, max_rounds=3):
         return history
 
     # 初始化 LLM（用于生成摘要）
-    llm = ChatOpenAI(
-        model=st.session_state.get("config_model_name", os.getenv("MODEL_NAME", "glm-4.7-flash")),
-        api_key=os.getenv("BIGMODEL_API_KEY"),
-        base_url="https://open.bigmodel.cn/api/paas/v4/",
-        temperature=0.3,
-    )
+    llm = get_llm(streaming=False, temperature=0.3)
 
     # 循环压缩，最多执行 max_rounds 轮
     for _ in range(max_rounds):

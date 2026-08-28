@@ -1,5 +1,6 @@
 # ========== 定义聊天页面 ==========
-import logger
+import logging
+
 import streamlit as st
 from setuptools import logging
 
@@ -21,6 +22,15 @@ from src.retrieval.vectorstore import (
     search_with_score,
 )
 
+logger = logging.getLogger(__name__)
+EXPLICIT_WEB_KEYWORDS = ("联网搜索", "上网搜索", "搜索网络", "查询网络")
+
+
+def has_explicit_web_consent(query: str) -> bool:
+    """用户明确要求联网时，才允许内部知识查询回退到外部搜索。"""
+    return any(keyword in query for keyword in EXPLICIT_WEB_KEYWORDS)
+
+
 def chat_page():
     st.title("智能助手")
 
@@ -36,12 +46,16 @@ def chat_page():
 
 
     if user_input := st.chat_input("请输入您的问题..."):
-        # st.session_state.messages.append({"role": "user", "content": user_input})
+        # 先保存进入本轮前的历史，再单独追加当前问题。
+        # 这样生成阶段无需依赖 messages[:-1]，也不会重复传入当前问题。
+        history = list(st.session_state.messages)
+        current_user_message = {"role": "user", "content": user_input}
+        st.session_state.messages.append(current_user_message)
+
         with st.chat_message("user"):
             st.markdown(user_input)
 
         with st.chat_message("assistant"):
-            history = st.session_state.messages[:-1]
             # ---------- 检查是否超限，需要压缩 ----------
             # 计算当前总 token（包括刚添加的用户消息）
             total_tokens = count_tokens(st.session_state.messages)
@@ -52,7 +66,7 @@ def chat_page():
                     # 压缩历史（只压缩历史部分，当前用户消息保留）
                     compressed_history = trim_history(history, max_tokens=threshold, target_ratio=st.session_state.config_target_ratio)
                     # 重建消息列表：压缩后的历史 + 当前用户消息
-                    st.session_state.messages = compressed_history + [{"role": "user", "content": user_input}]
+                    st.session_state.messages = compressed_history + [current_user_message]
                     # 更新 history 为压缩后的历史（供后续生成使用）
                     history = compressed_history
                     st.toast("✅ 压缩完成，正在生成回答...")
@@ -100,7 +114,11 @@ def chat_page():
 
                     if need_react:
                         # 进入 ReAct
-                        stream_gen = react_agent(user_input, history)
+                        stream_gen = react_agent(
+                            user_input,
+                            history,
+                            allow_web=(intent == "web" or has_explicit_web_consent(user_input)),
+                        )
                     else:
                         # 原有管道
                         if intent == "rag":
@@ -115,8 +133,13 @@ def chat_page():
                                 )
                                 if has_match:
                                     stream_gen = rag_chain_with_docs(docs, user_input)
-                                else:
+                                elif has_explicit_web_consent(user_input):
                                     stream_gen = general_chat_stream(user_input, history=history)
+                                else:
+                                    stream_gen = iter([
+                                        "🔒 内部知识库中没有找到足够相关的信息，本次未自动发送到外部网络。"
+                                        "如需继续，请在问题中明确写明“联网搜索”。"
+                                    ])
                         elif intent == "web":
                             stream_gen = general_chat_stream(user_input, history=history)
                         else:  # chat
@@ -188,6 +211,11 @@ def chat_page():
                 # 回答完成后更新 token 使用数量
                 update_token_display()
 
+                # 将本轮动态流式占位符转换为稳定的历史消息。
+                # 否则下次提交问题时，Streamlit 会在处理期间保留上一轮的灰色旧占位符，
+                # 与上方重新渲染的历史回答形成视觉重复。
+                st.rerun()
+
 
             except Exception as e:
                 # 记录详细错误日志
@@ -196,5 +224,3 @@ def chat_page():
                 logging.error(f"聊天页面发生错误: {error_details}")
                 # 用户友好提示
                 st.error("⚠️ 处理请求时出现意外错误，请稍后重试。")
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": "抱歉，我暂时无法处理您的请求，请稍后再试。"})

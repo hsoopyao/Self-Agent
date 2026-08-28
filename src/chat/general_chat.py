@@ -1,61 +1,74 @@
 """
 通用对话模块：处理非内部知识的问题，支持联网搜索（流式）。
 """
-import concurrent.futures
+import logging
+import os
+from functools import lru_cache
 
-from langchain_community.tools import TavilySearchResults
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from tavily import TavilyClient
+from tavily.errors import TimeoutError as TavilyTimeoutError
 
 from src.core.llm_client import get_llm
 from src.core.config import load_prompt
 
 GENERAL_SYSTEM = load_prompt("general_system.txt")
 GENERAL_USER_TEMPLATE = load_prompt("general_user.txt")
+logger = logging.getLogger(__name__)
 
-# 1. 初始化 LLM（流式）
-llm = get_llm(streaming=True, temperature=0.7)
 
-# 2. 初始化 Tavily 搜索引擎
-tavily_tool = TavilySearchResults(
-    max_results=5,
-    include_answer=True,
-    # search_depth="advanced", # 如需深度搜索可启用
-)
+def _get_search_timeout() -> float:
+    try:
+        timeout = float(os.getenv("TAVILY_SEARCH_TIMEOUT", "5"))
+        return timeout if timeout > 0 else 5.0
+    except (TypeError, ValueError):
+        return 5.0
+
+
+@lru_cache(maxsize=1)
+def get_tavily_client():
+    """延迟创建搜索客户端，避免未配置 Tavily 时阻断应用启动。"""
+    return TavilyClient()
+
+
+def search_results(query: str, timeout: float | None = None) -> list[dict]:
+    """执行带 HTTP 请求超时的 Tavily 搜索并返回结果列表。"""
+    response = get_tavily_client().search(
+        query=query,
+        max_results=5,
+        include_answer=True,
+        timeout=timeout if timeout is not None else _get_search_timeout(),
+    )
+    return response.get("results", [])
 
 # 为了保持代码兼容性，可以定义一个统一的搜索接口
 def search(query: str) -> str:
-    try:
-        # Tavily的invoke方法返回一个列表，我们提取内容
-        results = tavily_tool.invoke({"query": query})
-        # 将结果格式化为字符串
-        return "\n".join([f"{item['title']}: {item['content']}" for item in results])
-    except Exception as e:
-        raise e
+    results = search_results(query)
+    return "\n".join([f"{item['title']}: {item['content']}" for item in results])
 
-def search_with_timeout(query, timeout=2):
+
+def search_with_timeout(query, timeout=None):
     """
-    带有超时控制的搜索。
+    使用 Tavily 客户端的底层 HTTP 超时执行搜索。
     如果超时或失败，返回 None。
     """
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(tavily_tool.invoke, {"query": query})
-            try:
-                results = future.result(timeout=timeout)
-                if not results:
-                    return None
-                # 根据实际返回的数据结构调整
-                return "\n".join([f"{item['title']}: {item['content']}" for item in results])
-            except concurrent.futures.TimeoutError:
-                # 超时，取消任务并返回 None
-                future.cancel()
-                return None
+        results = search_results(query, timeout=timeout)
+        if not results:
+            return None
+        return "\n".join([f"{item['title']}: {item['content']}" for item in results])
+    except TavilyTimeoutError:
+        logger.warning("Tavily 搜索超时，query=%r", query)
+        return None
     except Exception:
+        logger.exception("Tavily 搜索失败，query=%r", query)
         return None
 
 def general_chat_stream(question: str, history: list = None):
     try:
-        search_result = search_with_timeout(question, timeout=2)
+        # 延迟到实际对话时创建，避免未配置 API Key 时阻断应用启动。
+        llm = get_llm(streaming=True, temperature=0.7)
+        search_result = search_with_timeout(question)
         search_info = f"搜索到的信息：{search_result}" if search_result else ""
         messages = [
             SystemMessage(content=GENERAL_SYSTEM),
@@ -82,10 +95,7 @@ def general_chat_stream(question: str, history: list = None):
             yield chunk.content
         if not has_chunk:
             yield "（未能生成回答，请稍后重试）"
-    except Exception as e:
-        # 记录日志
-        import logging, traceback
-        logger = logging.getLogger(__name__)
-        logger.error(f"ReAct 循环出错: {traceback.format_exc()}")
+    except Exception:
+        logger.exception("联网聊天处理失败")
         # 用户友好提示
         yield "⚠️ 处理请求时出现内部错误，请稍后重试。"
