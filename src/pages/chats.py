@@ -223,5 +223,3 @@ def chat_page():
                 logger.error(f"聊天页面发生错误: {error_details}")
                 # 用户友好提示
                 st.error("⚠️ 处理请求时出现意外错误，请稍后重试。")
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": "抱歉，我暂时无法处理您的请求，请稍后再试。"})
