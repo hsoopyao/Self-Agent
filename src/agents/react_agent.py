@@ -4,6 +4,7 @@ import time
 import streamlit as st
 from typing import Generator, List, Dict, Tuple
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from sqlalchemy.testing.plugin.plugin_base import logging
 
 from src.retrieval.vectorstore import search_with_score
 from src.chat.direct_chat import direct_chat_sync
@@ -87,6 +88,8 @@ def call_tool(tool_name: str, query: str) -> Tuple[str, str, str]:
     print(f"执行工具: {tool_name}")
     if tool_name == "rag_search":
         return execute_rag(query)
+    elif tool_name.startswith("maoyan_"):
+        return execute_maoyan_tool(tool_name, query)
     elif tool_name == "web_search":
         return execute_web(query)
     elif tool_name == "direct_chat":
@@ -292,3 +295,78 @@ def react_agent(user_input: str, history: List[Dict[str, str]]) -> Generator[str
             else:
                 yield "[FINAL]⚠️ 处理请求时出现内部错误，请稍后重试。"
     yield "[FINAL]⚠️ 超出最大思考步数，请简化问题。"
+
+from src.agents.movie_tool import (
+    get_city_id,
+    search_cinemas,
+    get_cinema_showtimes,
+    search_movie,
+    get_movie_cinemas,
+    extract_cinema_summary,
+    extract_movie_summary,
+    extract_showtime_summary,
+)
+
+def execute_maoyan_tool(tool_name: str, tool_input: str) -> Tuple[str, str, str]:
+    """
+    执行猫眼工具，返回 (摘要, 出处, 完整内容)
+    """
+    try:
+        if tool_name == "maoyan_city_id":
+            success, result = get_city_id(tool_input)
+            summary = f"城市ID查询{'成功' if success else '失败'}"
+            return summary, "", result if not success else f"城市 {tool_input} 的 ID 为 {result}"
+
+        elif tool_name == "maoyan_search_cinemas":
+            # 输入格式: "city_id|keyword" 或 "city_id"
+            parts = tool_input.split("|")
+            city_id = parts[0].strip()
+            keyword = parts[1].strip() if len(parts) > 1 else ""
+            success, result = search_cinemas(city_id, keyword)
+            if success:
+                summary = extract_cinema_summary(result)
+            else:
+                summary = "查询失败"
+            return summary, "", result
+
+        elif tool_name == "maoyan_showtimes":
+            # 输入格式: "cinema_id|city_id" 或 "cinema_id"
+            parts = tool_input.split("|")
+            cinema_id = parts[0].strip()
+            city_id = parts[1].strip() if len(parts) > 1 else ""
+            success, result = get_cinema_showtimes(cinema_id, city_id)
+            if success:
+                summary = extract_showtime_summary(result)
+            else:
+                summary = "查询失败"
+            return summary, "", result
+
+        elif tool_name == "maoyan_search_movie":
+            # 输入格式: "movie_name|city_id"
+            parts = tool_input.split("|")
+            movie_name = parts[0].strip()
+            city_id = parts[1].strip() if len(parts) > 1 else ""
+            success, result = search_movie(movie_name, city_id)
+            if success:
+                summary = extract_movie_summary(result)
+            else:
+                summary = "查询失败"
+            return summary, "", result
+
+        elif tool_name == "maoyan_movie_cinemas":
+            # 输入格式: "movie_id|city_id"
+            parts = tool_input.split("|")
+            movie_id = parts[0].strip()
+            city_id = parts[1].strip() if len(parts) > 1 else ""
+            success, result = get_movie_cinemas(movie_id, city_id)
+            if success:
+                summary = extract_cinema_summary(result)
+            else:
+                summary = "查询失败"
+            return summary, "", result
+
+        else:
+            return f"未知猫眼工具: {tool_name}", "", ""
+    except Exception as e:
+        logging.error(f"执行猫眼工具失败: {e}")
+        return f"⚠️ 查询失败: {str(e)}", "", ""

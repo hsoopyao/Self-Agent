@@ -1,6 +1,7 @@
 # ========== 定义聊天页面 ==========
 import logger
 import streamlit as st
+from setuptools import logging
 
 from src.core.context_manager import count_tokens, trim_history
 from src.core.config import INTRODUCE
@@ -88,14 +89,14 @@ def chat_page():
                             if has_match and score < 0.4:
                                 need_react = True
 
-                        # 用于调试
-                        # print(f"用户输入: {user_input}")
-                        # print(f"intent: {intent}")
-                        # print(f"复杂关键词命中: {any(kw in user_input for kw in complex_keywords)}")
-                        # print(f"need_react 当前值: {need_react}")
-                        # # 打印调用栈，看看谁修改了 need_react
-                        # import traceback
-                        # traceback.print_stack()
+                        ## 用于调试
+                        print(f"用户输入: {user_input}")
+                        print(f"intent: {intent}")
+                        print(f"复杂关键词命中: {any(kw in user_input for kw in complex_keywords)}")
+                        print(f"need_react 当前值: {need_react}")
+                        # 打印调用栈，看看谁修改了 need_react
+                        import traceback
+                        traceback.print_stack()
 
                     if need_react:
                         # 进入 ReAct
@@ -192,7 +193,7 @@ def chat_page():
                 # 记录详细错误日志
                 import traceback
                 error_details = traceback.format_exc()
-                logger.error(f"聊天页面发生错误: {error_details}")
+                logging.error(f"聊天页面发生错误: {error_details}")
                 # 用户友好提示
                 st.error("⚠️ 处理请求时出现意外错误，请稍后重试。")
                 st.session_state.messages.append(
