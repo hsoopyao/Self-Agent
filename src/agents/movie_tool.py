@@ -1,24 +1,28 @@
 import os
+import sys
 import subprocess
 import json
 import logging
+from pathlib import Path
 from typing import Tuple, List, Dict, Any
 
 logger = logging.getLogger(__name__)
-MAOYAN_CLI_PATH = "D:\\Project\\Self-Agent\\skills\\maoyan-cli\\scripts\\maoyan_cli.py"
-SKILLS_DIR = "D:\\Project\\Self-Agent\\skills"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SKILLS_DIR = PROJECT_ROOT / "skills"
+MAOYAN_CLI_PATH = SKILLS_DIR / "maoyan-cli" / "scripts" / "maoyan_cli.py"
 
 def _run_maoyan_command(args: List[str]) -> Dict[str, Any]:
-    cmd = ["python", "-X", "utf8", MAOYAN_CLI_PATH] + args
+    # 使用当前虚拟环境的 Python，避免调用到系统 Python。
+    cmd = [sys.executable, "-X", "utf8", str(MAOYAN_CLI_PATH)] + args
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
-    logger.debug(f"执行命令: {' '.join(cmd)}，cwd={SKILLS_DIR}")
+
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
             timeout=30,
-            cwd=SKILLS_DIR,
+            cwd=str(SKILLS_DIR),
             env=env,
         )
         stdout = result.stdout
@@ -140,7 +144,11 @@ def get_movie_cinemas(movie_id: str, city_id: str, limit: int = 20) -> Tuple[boo
     return True, json.dumps(cinemas, ensure_ascii=False, indent=2)
 
 def extract_cinema_summary(cinemas_json: str, max_items: int = 5) -> str:
-    """从影院列表JSON中提取简要信息（名称 + 地址 + 价格）"""
+    """从影院列表 JSON 中提取简要信息（包含影院 ID）。
+
+    影院 ID 是下一步查询排片的必要参数，必须放在摘要中；只把完整
+    JSON 截断后交给模型会让 ID 消失，导致模型重复搜索影院并耗尽步数。
+    """
     try:
         cinemas = json.loads(cinemas_json)
         if not cinemas:
@@ -148,9 +156,10 @@ def extract_cinema_summary(cinemas_json: str, max_items: int = 5) -> str:
         lines = []
         for i, c in enumerate(cinemas[:max_items], 1):
             name = c.get("name", "未知影院")
+            cinema_id = c.get("cinemaId", c.get("id", "未知ID"))
             addr = c.get("address", c.get("addr", ""))
             price = c.get("price", c.get("priceDesc", ""))
-            lines.append(f"{i}. {name}（{addr}）{price}起")
+            lines.append(f"{i}. {name}（影院ID:{cinema_id}，{addr}）{price}起")
         if len(cinemas) > max_items:
             lines.append(f"... 共{len(cinemas)}家影院")
         return "\n".join(lines)
@@ -190,6 +199,9 @@ def extract_showtime_summary(showtimes_json: str) -> str:
         lines = [f"🎬 {cinema_name} 排片："]
         for movie in movies[:3]:  # 只取前3部
             movie_name = movie.get("nm", "未知")
+            score = movie.get("sc") or movie.get("score") or "暂无评分"
+            category = movie.get("cat") or movie.get("type") or ""
+            duration = movie.get("dur") or movie.get("duration") or ""
             shows = movie.get("shows", [])
             if not shows:
                 continue
@@ -197,7 +209,12 @@ def extract_showtime_summary(showtimes_json: str) -> str:
             first_day_shows = shows[0].get("plist", [])
             times = [s.get("tm", "") for s in first_day_shows[:3]]
             price = first_day_shows[0].get("vipDisPrice", "??") if first_day_shows else "?"
-            lines.append(f"  {movie_name} 场次：{'、'.join(times)} 起价{price}元")
+            details = [f"评分{score}"]
+            if category:
+                details.append(f"类型{category}")
+            if duration:
+                details.append(f"时长{duration}分钟" if isinstance(duration, (int, float)) else f"时长{duration}")
+            lines.append(f"  {movie_name}（{'，'.join(details)}）场次：{'、'.join(times)} 起价{price}元")
         if len(movies) > 3:
             lines.append(f"  ... 共{len(movies)}部电影")
         return "\n".join(lines)

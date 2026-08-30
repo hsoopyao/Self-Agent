@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import streamlit as st
 from typing import Generator, List, Dict, Tuple
@@ -149,12 +150,37 @@ def extract_json(content: str):
                         except:
                             break
 
-    # 4. 尝试提取 final_answer（当 JSON 解析失败时）
-    # 如果响应中包含 "final_answer"，尝试用正则提取
-    match = re.search(r'"final_answer"\s*:\s*"([^"]*)"', content, re.DOTALL)
+    # 4. 尝试提取 final_answer（包括响应被截断、缺少结尾引号的情况）
+    # 模型输出过长时，常见结果是 JSON 只生成到 final_answer 中间。
+    match = re.search(r'"final_answer"\s*:\s*"', content, re.DOTALL)
     if match:
-        final_answer = match.group(1)
-        final_answer = final_answer.replace('\\n', '\n').replace('\\"', '"')
+        fragment = content[match.end():]
+        value_chars = []
+        escaped = False
+        for char in fragment:
+            if escaped:
+                value_chars.append("\\" + char)
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                break
+            else:
+                value_chars.append(char)
+
+        # 如果响应正好在转义符后截断，丢弃这个不完整的转义序列。
+        value_fragment = "".join(value_chars)
+        try:
+            final_answer = json.loads(f'"{value_fragment}"')
+        except json.JSONDecodeError:
+            final_answer = (
+                value_fragment
+                .replace("\\n", "\n")
+                .replace("\\r", "\r")
+                .replace("\\t", "\t")
+                .replace('\\"', '"')
+                .replace("\\\\", "\\")
+            )
         return {"final_answer": final_answer}
 
     # 5. 尝试修复常见格式问题
@@ -207,6 +233,33 @@ def extract_relevant_snippets(text: str, query: str, max_sentences: int = 4) -> 
 # ---------- ReAct 提示词 ----------
 REACT_SYSTEM = load_prompt("react_system.txt")
 
+
+def _configured_react_steps() -> int:
+    """读取 ReAct 步数上限，并限制在合理范围内。
+
+    首次查询猫眼排片需要依次获取城市、影院和排片 ID，5 步很容易在
+    已拿到最后一个观察结果后没有机会再生成 final_answer。允许通过
+    ``REACT_MAX_STEPS`` 调整，但不接受过小或异常值。
+    """
+    configured = st.session_state.get("config_react_max_steps")
+    if configured is None:
+        configured = os.getenv("REACT_MAX_STEPS", "8")
+    try:
+        return max(5, min(int(configured), 20))
+    except (TypeError, ValueError):
+        return 8
+
+
+def _max_steps_for_query(user_input: str) -> int:
+    """为需要多次 ID 查询的电影问题预留足够的推理步数。"""
+    max_steps = _configured_react_steps()
+    movie_keywords = ("电影", "影院", "电影院", "排片", "场次", "猫眼")
+    if any(keyword in user_input for keyword in movie_keywords):
+        # 城市 ID → 影院/电影 ID → 排片，可能还需要选择目标影院；
+        # 电影查询至少预留一次最终答案调用。
+        return max(max_steps, 10)
+    return max_steps
+
 # ---------- ReAct 主循环 ----------
 def react_agent(
     user_input: str,
@@ -231,7 +284,7 @@ def react_agent(
     # 当前用户问题
     messages.append(HumanMessage(content=user_input))
 
-    max_steps = 5
+    max_steps = _max_steps_for_query(user_input)
     step = 0
     executed_actions = set()
     while step < max_steps:
@@ -276,7 +329,7 @@ def react_agent(
                     yield f"[OBSERVATION]📊 观察结果：{summary} （出处：{source}）"
                 else:
                     yield f"[OBSERVATION]📊 观察结果：{summary}"
-
+                print(f"[THOUGHT]💭 思考: {thought} | [ACTION]🔧 调用工具：{tool_name}，参数：{tool_input}")
                 # 将完整内容存入 session_state，供预览使用
                 if "observation_details" not in st.session_state:
                     st.session_state.observation_details = []
