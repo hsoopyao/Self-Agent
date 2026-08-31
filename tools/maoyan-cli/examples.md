@@ -6,7 +6,7 @@
 
 ## CLI 示例
 
-（从项目根目录执行，脚本路径为 `skills/maoyan-cli/scripts/maoyan_cli.py`）
+（从项目根目录执行，脚本路径为 `../maoyan-cli/scripts/maoyan_cli.py`）
 
 ```bash
 # 城市：查北京

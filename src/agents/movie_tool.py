@@ -9,7 +9,7 @@ from typing import Tuple, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SKILLS_DIR = PROJECT_ROOT / "skills"
+SKILLS_DIR = PROJECT_ROOT / "tools"
 MAOYAN_CLI_PATH = SKILLS_DIR / "maoyan-cli" / "scripts" / "maoyan_cli.py"
 
 def _run_maoyan_command(args: List[str]) -> Dict[str, Any]:
@@ -149,9 +149,7 @@ def get_movie_cinemas(movie_id: str, city_id: str, limit: int = 20) -> Tuple[boo
     查询某部电影在指定城市的所有放映影院
     返回: (是否成功, 影院列表JSON字符串 或 错误信息)
     """
-    print(f"get_movie_cinemas参数 - movie_id: {movie_id}, city_id: {city_id}")
     data = _run_maoyan_command(["movie-cinemas", movie_id, city_id, "--limit", str(limit)])
-    print(f"get_movie_cinemas响应: {data}")
     if not data.get("ok", False):
         return False, data.get("error", "未知错误")
 
