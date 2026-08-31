@@ -37,6 +37,7 @@ def render_sidebar():
             with col2:
                 st.metric("临时阈值", f"{st.session_state.config_temp_score_threshold:.2f}")
                 st.metric("压缩比例", f"{st.session_state.config_target_ratio:.2f}")
+            st.metric("ReAct最大步数", st.session_state.config_react_max_steps)
             st.caption(f"**触发React关键词**：{st.session_state.config_complex_keywords}")
 
         st.divider()

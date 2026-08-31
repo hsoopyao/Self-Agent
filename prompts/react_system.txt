@@ -32,6 +32,8 @@
 
 **关键**：`maoyan_movie_cinemas` 返回的每个影院已包含 **`lastShowTimes`** 字段（当日该电影的所有场次时间），以及 `name`、`addr`、`priceDesc` 等。请**直接汇总这些信息**作为最终答案，**严禁再调用 `maoyan_showtimes` 去查询每个影院的排片**（那是查询“某影院所有电影排片”时用的，不适用于本场景）。
 
+- 如果 `maoyan_movie_cinemas` 返回空列表，说明当前城市没有找到该电影的上映影院。请直接输出最终答案，不要改用 `maoyan_search_cinemas` 查询全城影院，也不要逐家调用 `maoyan_showtimes` 试探。
+
 - 如果用户明确要求查看某家影院的完整排片（所有电影），才单独对该影院调用 `maoyan_showtimes`。
 - 否则，**只使用 `movie_cinemas` 一次**，不再重复调用。
 

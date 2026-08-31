@@ -243,11 +243,11 @@ def _configured_react_steps() -> int:
     """
     configured = st.session_state.get("config_react_max_steps")
     if configured is None:
-        configured = os.getenv("REACT_MAX_STEPS", "8")
+        configured = os.getenv("REACT_MAX_STEPS", "10")
     try:
         return max(5, min(int(configured), 20))
     except (TypeError, ValueError):
-        return 8
+        return 10
 
 
 def _max_steps_for_query(user_input: str) -> int:
@@ -259,6 +259,47 @@ def _max_steps_for_query(user_input: str) -> int:
         # 电影查询至少预留一次最终答案调用。
         return max(max_steps, 10)
     return max_steps
+
+
+def _is_timeout_error(error: Exception) -> bool:
+    """识别 LLM/HTTP 客户端抛出的超时异常。"""
+    error_text = str(error).lower()
+    error_type = type(error).__name__.lower()
+    return (
+        isinstance(error, TimeoutError)
+        or "timeout" in error_type
+        or "timed out" in error_text
+        or "request timed out" in error_text
+    )
+
+
+def _is_empty_json_list(value: str) -> bool:
+    """判断工具是否返回了空 JSON 数组。"""
+    try:
+        parsed = json.loads(value or "")
+        return isinstance(parsed, list) and not parsed
+    except (TypeError, json.JSONDecodeError):
+        return False
+
+
+def _build_observation_context(tool_name: str, summary: str, full_content: str) -> str:
+    """为下一次 LLM 决策构造紧凑观察，避免重复携带大段猫眼 JSON。"""
+    summary = summary or "无摘要"
+    full_content = full_content or ""
+
+    if tool_name == "maoyan_city_id":
+        # 城市 ID 不一定出现在摘要中，必须保留工具返回值。
+        return f"观察结果（摘要）：{summary}\n观察结果：{full_content[:300]}"
+
+    if tool_name.startswith("maoyan_"):
+        # 猫眼摘要已提取影院/电影 ID、场次和价格；仅在失败时附带少量原始错误。
+        context = f"观察结果（摘要）：{summary}"
+        if "失败" in summary or "错误" in summary:
+            context += f"\n工具返回：{full_content[:600]}"
+        return context
+
+    truncated_full = full_content[:1000] + "..." if len(full_content) > 1000 else full_content
+    return f"观察结果（摘要）：{summary}\n\n观察结果（完整）：{truncated_full}"
 
 # ---------- ReAct 主循环 ----------
 def react_agent(
@@ -324,6 +365,10 @@ def react_agent(
                     tool_input,
                     allow_web=allow_web,
                 )
+                movie_cinemas_empty = (
+                    tool_name == "maoyan_movie_cinemas"
+                    and _is_empty_json_list(full_content)
+                )
                 # 显示观察结果（摘要 + 出处）
                 if source:
                     yield f"[OBSERVATION]📊 观察结果：{summary} （出处：{source}）"
@@ -340,9 +385,17 @@ def react_agent(
                 })
                 # 将 assistant 的响应和观察结果加入消息历史
                 messages.append(AIMessage(content=content))
-                # 将摘要 + 完整内容（截断）加入历史，避免循环
-                truncated_full = full_content[:1000] + "..." if len(full_content) > 1000 else full_content
-                messages.append(HumanMessage(content=f"观察结果（摘要）：{summary}\n\n观察结果（完整）：{truncated_full}"))
+                observation_context = _build_observation_context(
+                    tool_name,
+                    summary,
+                    full_content,
+                )
+                if movie_cinemas_empty:
+                    observation_context += (
+                        "\n该电影在目标城市没有返回上映影院，这是本次查询的终态。"
+                        "请直接输出 final_answer，不要改查全城影院或逐个影院试探。"
+                    )
+                messages.append(HumanMessage(content=observation_context))
             else:
                 yield "[FINAL]抱歉，我无法继续推理，请重试。"
                 return
@@ -353,7 +406,9 @@ def react_agent(
             logger = logging.getLogger(__name__)
             logger.error(f"ReAct 循环出错: {traceback.format_exc()}")
             # 用户友好提示
-            if "contentFilter" in error_str or "1301" in error_str:
+            if _is_timeout_error(e):
+                yield "[FINAL]⚠️ 模型请求超时。已保留前面的查询过程，请稍后重试；也可以减少查询影院数量或简化问题。"
+            elif "contentFilter" in error_str or "1301" in error_str:
                 yield "[FINAL]⚠️ 系统检测到输入或生成内容可能包含不安全或敏感内容，请您避免输入易产生敏感内容的提示语，感谢您的配合。"
             else:
                 yield "[FINAL]⚠️ 处理请求时出现内部错误，请稍后重试。"
