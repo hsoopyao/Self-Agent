@@ -37,7 +37,6 @@ def route_query(question: str) -> str:
     # 提取工具调用
     if response.tool_calls:
         tool_name = response.tool_calls[0]["name"]
-        print(f"路由结果: {tool_name}")
         # 映射到我们的分类
         if tool_name == "rag_search":
             return "rag"

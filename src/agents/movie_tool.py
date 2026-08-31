@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import subprocess
 import json
@@ -77,12 +78,27 @@ def get_city_id(city_name: str) -> Tuple[bool, str]:
 
 
 # ---------- 2. 搜索影院 ----------
-def search_cinemas(city_id: str, keyword: str = "", limit: int = 100) -> Tuple[bool, str]:
+def search_cinemas(city_id: str, keyword: str = "", lat: float = 0.0, lng: float = 0.0, limit: int = 100, ) -> Tuple[
+    bool, str]:
     """
-    查询城市中的影院列表（支持关键词过滤）
-    返回: (是否成功, 影院列表JSON字符串 或 错误信息)
+    查询城市中的影院列表（支持关键词过滤和经纬度排序）
+
+    Args:
+        city_id: 城市ID
+        keyword: 影院名称关键词（可选）
+        limit: 返回数量上限（默认100）
+        lat: 纬度（可选），用于按距离排序
+        lng: 经度（可选），用于按距离排序
+
+    Returns:
+        (是否成功, 影院列表JSON字符串 或 错误信息)
     """
-    data = _run_maoyan_command(["cinemas", city_id, "--limit", str(limit)])
+    # 构建命令参数
+    cmd = ["cinemas", city_id]
+    if lat != 0.0 and lng != 0.0:
+        cmd.extend(["--lat", str(lat), "--lng", str(lng)])
+    cmd.extend(["--limit", str(limit)])
+    data = _run_maoyan_command(cmd)
     if not data.get("ok", False):
         return False, data.get("error", "未知错误")
 
@@ -143,11 +159,10 @@ def get_movie_cinemas(movie_id: str, city_id: str, limit: int = 20) -> Tuple[boo
     # 返回影院列表（包含 id, name, addr, priceDesc, lastShowTimes 等）
     return True, json.dumps(cinemas, ensure_ascii=False, indent=2)
 
-def extract_cinema_summary(cinemas_json: str, max_items: int = 5) -> str:
-    """从影院列表 JSON 中提取简要信息（包含影院 ID）。
-
-    影院 ID 是下一步查询排片的必要参数，必须放在摘要中；只把完整
-    JSON 截断后交给模型会让 ID 消失，导致模型重复搜索影院并耗尽步数。
+def extract_cinema_summary(cinemas_json: str, max_items: int = 10) -> str:
+    """
+    从 get_movie_cinemas 返回的影院列表 JSON 中提取摘要，
+    包含影院 ID、名称、地址、距离、价格、标签、近期场次。
     """
     try:
         cinemas = json.loads(cinemas_json)
@@ -155,20 +170,56 @@ def extract_cinema_summary(cinemas_json: str, max_items: int = 5) -> str:
             return "未找到符合条件的影院。"
         lines = []
         for i, c in enumerate(cinemas[:max_items], 1):
+            # 基础信息
             name = c.get("name", "未知影院")
-            cinema_id = c.get("cinemaId", c.get("id", "未知ID"))
-            addr = c.get("address", c.get("addr", ""))
-            price = c.get("price", c.get("priceDesc", ""))
-            lines.append(f"{i}. {name}（影院ID:{cinema_id}，{addr}）{price}起")
+            cinema_id = c.get("cinemaId") or c.get("id", "未知ID")
+            addr = c.get("address", c.get("addr", "地址不详"))
+            price = c.get("price", c.get("priceDesc", "价格待定"))
+            distance = c.get("distance", "")
+            # 场次列表
+            shows = c.get("lastShowTimes", [])
+            if isinstance(shows, list) and shows:
+                show_str = "、".join(shows)
+            else:
+                show_str = "暂无场次"
+
+            # 标签：从 cinemaLabelResource 提取 desc
+            label_resources = c.get("cinemaLabelResource", [])
+            labels = []
+            for lr in label_resources:
+                desc = lr.get("desc", "")
+                if desc:
+                    labels.append(desc.strip())
+            label_str = "，".join(labels) if labels else ""
+
+            # 构建该影院的信息字符串
+            parts = [
+                f"**{i}. {name}**（ID:{cinema_id}）",
+                f"地址：{addr}",
+                f"价格：{price}起",
+                f"场次：{show_str}"
+            ]
+            if distance:
+                parts.append(f"距离：{distance}")
+            if label_str:
+                parts.append(f"标签：{label_str}")
+
+            lines.append("，".join(parts))
+
         if len(cinemas) > max_items:
-            lines.append(f"... 共{len(cinemas)}家影院")
+            lines.append(f"... 共 {len(cinemas)} 家影院，仅展示前 {max_items} 家")
+
         return "\n".join(lines)
-    except:
-        return "无法解析影院信息。"
+
+    except Exception as e:
+        return f"⚠️ 影院信息解析失败: {str(e)}"
 
 
 def extract_movie_summary(movies_json: str, max_items: int = 5) -> str:
-    """从电影列表JSON中提取简要信息（名称 + 评分 + 上映状态）"""
+    """
+    从电影列表 JSON（如 maoyan_search_movie 的返回）中提取完整摘要，
+    包含 ID、评分、类型、时长、导演、主演、上映日期、想看人数等。
+    """
     try:
         movies = json.loads(movies_json)
         if not movies:
@@ -176,47 +227,116 @@ def extract_movie_summary(movies_json: str, max_items: int = 5) -> str:
         lines = []
         for i, m in enumerate(movies[:max_items], 1):
             name = m.get("nm", "未知电影")
+            movie_id = m.get("id", "无ID")
             score = m.get("sc", "暂无评分")
-            status = "已上映" if m.get("showst", 0) == 3 else "未上映"
-            lines.append(f"{i}. {name}（ID:{m.get('id')}，评分{score}，{status}）")
+            categories = m.get("cat", "暂无分类")
+            duration = m.get("dur", "时长未知")
+            director = m.get("dir", "暂无导演信息")
+            actors = m.get("star", "暂无主演信息")
+            # 上映日期：优先 rt，其次 pubDesc
+            release = m.get("rt", m.get("pubDesc", "上映日期不详"))
+            wish = m.get("wish", 0)
+            # 上映状态
+            showst = m.get("showst", 0)
+            status = "已上映" if showst == 3 else "未上映"
+
+            # 构建描述
+            lines.append(
+                f"{i}. **{name}**（ID:{movie_id}）\n"
+                f"   评分：{score}，类型：{categories}，时长：{duration}分钟\n"
+                f"   导演：{director}，主演：{actors}\n"
+                f"   上映日期：{release}，状态：{status}，想看人数：{wish}"
+            )
         if len(movies) > max_items:
-            lines.append(f"... 共{len(movies)}部电影")
+            lines.append(f"... 共 {len(movies)} 部电影，仅展示前 {max_items} 部")
         return "\n".join(lines)
-    except:
-        return "无法解析电影信息。"
+    except Exception as e:
+        return f"⚠️ 电影信息解析失败: {str(e)}"
 
 
-def extract_showtime_summary(showtimes_json: str) -> str:
-    """从排片JSON中提取电影及场次摘要"""
+def extract_showtime_summary(showtimes_json: str, max_movies: int = 5, max_days: int = 3, max_shows_per_day: int = 5) -> str:
+    """
+    从 maoyan_showtimes 的 JSON 响应中提取排片摘要。
+    参数可控制输出的电影数、天数、每日场次数。
+    """
     try:
         data = json.loads(showtimes_json)
-        cinema_id = data.get("id") or data.get("cinemaId", "无ID")
         cinema_name = data.get("cinemaName", "该影院")
+        cinema_id = data.get("cinemaId", "未知ID")
         movies = data.get("movies", [])
         if not movies:
             return f"{cinema_name} 今日暂无排片。"
 
-        lines = [f"🎬 {cinema_name} 排片："]
-        for movie in movies[:3]:  # 只取前3部
+        lines = [f"🎬 {cinema_name}（ID:{cinema_id}）排片如下："]
+        for idx, movie in enumerate(movies[:max_movies], 1):
+            # ---------- 电影基本信息 ----------
             movie_name = movie.get("nm", "未知")
-            score = movie.get("sc") or movie.get("score") or "暂无评分"
-            category = movie.get("cat") or movie.get("type") or ""
-            duration = movie.get("dur") or movie.get("duration") or ""
-            shows = movie.get("shows", [])
-            if not shows:
-                continue
-            # 取第一天的场次（一般 shows 数组按日期分组）
-            first_day_shows = shows[0].get("plist", [])
-            times = [s.get("tm", "") for s in first_day_shows[:3]]
-            price = first_day_shows[0].get("vipDisPrice", "??") if first_day_shows else "?"
-            details = [f"评分{score}"]
+            score = movie.get("sc", "暂无评分")
+            desc = movie.get("desc", "")
+            # 解析 desc：如 "172分钟 | 动作 | 马特·达蒙,汤姆·赫兰德"
+            parts = [p.strip() for p in desc.split('|')] if desc else []
+            duration = parts[0] if len(parts) > 0 else ""
+            category = parts[1] if len(parts) > 1 else ""
+            actors = parts[2] if len(parts) > 2 else ""
+            # 构建电影标题
+            title_parts = [f"{idx}. {movie_name}（评分{score}）"]
             if category:
-                details.append(f"类型{category}")
+                title_parts.append(f"类型：{category}")
             if duration:
-                details.append(f"时长{duration}分钟" if isinstance(duration, (int, float)) else f"时长{duration}")
-            lines.append(f"  {movie_name}（{'，'.join(details)}）场次：{'、'.join(times)} 起价{price}元")
-        if len(movies) > 3:
-            lines.append(f"  ... 共{len(movies)}部电影")
+                title_parts.append(duration)
+            if actors:
+                title_parts.append(f"主演：{actors}")
+            lines.append("  " + "，".join(title_parts))
+
+            # ---------- 场次信息 ----------
+            all_shows = movie.get("shows", [])
+            if not all_shows:
+                lines.append("    暂无场次")
+                continue
+
+            # 按日期分组展示（最多 max_days 天）
+            for day_idx, day_show in enumerate(all_shows[:max_days], 1):
+                show_date = day_show.get("showDate", "未知日期")
+                plist = day_show.get("plist", [])
+                if not plist:
+                    continue
+                lines.append(f"    📅 {show_date}（共{len(plist)}场）：")
+                # 展示该日的前 max_shows_per_day 场
+                for p in plist[:max_shows_per_day]:
+                    tm = p.get("tm", "")
+                    th = p.get("th", "")
+                    tp = p.get("tp", "")
+                    # 价格：优先 vipDisPrice（影城卡价），否则 sellPr
+                    price = p.get("vipDisPrice") or p.get("sellPr", "")
+                    # 清理价格中的 HTML 实体和特殊字符，提取数字
+                    if price:
+                        # 移除 <span> 标签和特殊字符（如 &#xe916;）
+                        price_clean = re.sub(r'<[^>]+>', '', price)
+                        price_clean = re.sub(r'&#x[0-9a-fA-F]+;', '', price_clean)
+                        price_num = re.search(r'[\d.]+', price_clean)
+                        price_display = f"{price_num.group(0)}元" if price_num else price_clean
+                    else:
+                        price_display = "价格待定"
+
+                    # 组合场次信息
+                    field_parts = [f"时间 {tm}"]
+                    if th:
+                        field_parts.append(f"影厅 {th}")
+                    if tp:
+                        field_parts.append(f"版本 {tp}")
+                    field_parts.append(f"价格 {price_display}")
+                    lines.append(f"      {'，'.join(field_parts)}")
+
+                if len(plist) > max_shows_per_day:
+                    lines.append(f"      ... 还有 {len(plist) - max_shows_per_day} 场")
+
+            if len(all_shows) > max_days:
+                lines.append(f"    ... 还有 {len(all_shows) - max_days} 天排片")
+
+        if len(movies) > max_movies:
+            lines.append(f"  ... 共 {len(movies)} 部电影，仅展示前 {max_movies} 部")
+
         return "\n".join(lines)
-    except:
-        return "无法解析排片信息。"
+
+    except Exception as e:
+        return f"⚠️ 排片信息解析失败: {str(e)}"

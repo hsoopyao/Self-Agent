@@ -382,11 +382,16 @@ def execute_maoyan_tool(tool_name: str, tool_input: str) -> Tuple[str, str, str]
             return summary, "", result if not success else f"城市 {tool_input} 的 ID 为 {result}"
 
         elif tool_name == "maoyan_search_cinemas":
-            # 输入格式: "city_id|keyword" 或 "city_id"
+            # 输入格式: "city_id|lat|lng|keyword" 或 "city_id"
             parts = tool_input.split("|")
             city_id = parts[0].strip()
-            keyword = parts[1].strip() if len(parts) > 1 else ""
-            success, result = search_cinemas(city_id, keyword)
+            if len(parts) > 2:
+                lat = parts[1].strip()
+                lng = parts[2].strip()
+                success, result = search_cinemas(city_id, "", lat, lng)
+            else:
+                keyword = parts[1].strip() if len(parts) > 1 else ""
+                success, result = search_cinemas(city_id, keyword)
             if success:
                 summary = extract_cinema_summary(result)
             else:
