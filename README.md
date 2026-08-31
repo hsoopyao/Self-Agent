@@ -44,6 +44,8 @@ self-agent/
 ├── data/                          # 启动时自动加载的 PDF（示例文档）
 ├── init/                          # 初始化文件
 ├── doc/                           # 文档
+├── prompts/                       # 提示词
+├── tools/                         # 工具
 ├── src/
 │   ├── core/                      # 核心配置与工具
 │   │   ├── config.py              # 常量、默认配置、初始化
