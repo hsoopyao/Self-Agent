@@ -85,7 +85,7 @@ def call_tool(tool_name: str, query: str, allow_web: bool = True) -> Tuple[str, 
     """
     统一调用工具，返回 (摘要, 出处, 完整内容)
     """
-    print(f"执行工具: {tool_name}")
+    print(f"通过LLM路由并使用执行工具: {tool_name}")
     if tool_name == "rag_search":
         return execute_rag(query)
     elif tool_name.startswith("maoyan_"):
@@ -311,7 +311,7 @@ def react_agent(
     ReAct 循环，生成最终回答（流式输出）。
     每次 yield 一段文本（思考、工具调用、观察、最终答案）。
     """
-    llm = get_llm(streaming=False, temperature=0.1)
+    llm = get_llm(streaming=True, temperature=0.1)
     system_prompt = REACT_SYSTEM
     if not allow_web:
         system_prompt += "\n本次对话未获得联网授权，禁止调用 web_search；仅可使用内部知识库或直接回答。"
