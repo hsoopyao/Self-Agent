@@ -62,10 +62,10 @@ self-agent/
 │   │   ├── general_chat.py        # 联网搜索 + 通用对话
 │   │   └── direct_chat.py         # 纯闲聊
 │   ├── ui/                        # UI 组件（不包含页面）
-│   │   ├── components.py          # 卡片渲染函数
+│   │   ├── ui_componentes.py      # 卡片渲染函数
 │   │   └── sidebar.py             # 侧边栏逻辑
 │   └── pages/                     # 独立页面（保持原样，供 st.Page 引用）
-│       ├── chat.py                # 聊天页面（原 chat_page 函数移入）
+│       ├── chats.py               # 聊天页面（原 chat_page 函数移入）
 │       ├── knowledges.py          # 文档管理页面
 │       └── settings.py            # 设置页面
 ├── requirements.txt               # Python 依赖
