@@ -27,21 +27,6 @@ def render_sidebar():
         st.session_state.token_display = st.empty()
         update_token_display()
 
-        # 配置展示
-        with st.expander("⚙️ 当前配置"):
-            st.markdown(f"**模型**: `{st.session_state.config_model_name}`")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("全局阈值", f"{st.session_state.config_score_threshold:.2f}")
-                st.metric("最大Token", st.session_state.config_max_tokens)
-            with col2:
-                st.metric("临时阈值", f"{st.session_state.config_temp_score_threshold:.2f}")
-                st.metric("压缩比例", f"{st.session_state.config_target_ratio:.2f}")
-            st.metric("ReAct最大步数", st.session_state.config_react_max_steps)
-            st.caption(f"**触发React关键词**：{st.session_state.config_complex_keywords}")
-
-        st.divider()
-
         st.markdown("## 📎 会话临时文件")
 
         # 初始化临时上传器 key
@@ -74,6 +59,21 @@ def render_sidebar():
                             st.toast(f"删除失败：{name}", icon="❌")
         else:
             st.caption("无临时文件")
+
+        st.divider()
+
+        # 配置展示
+        with st.expander("⚙️ 当前配置"):
+            st.markdown(f"**模型**: `{st.session_state.config_model_name}`")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("全局阈值", f"{st.session_state.config_score_threshold:.2f}")
+                st.metric("最大Token", st.session_state.config_max_tokens)
+            with col2:
+                st.metric("临时阈值", f"{st.session_state.config_temp_score_threshold:.2f}")
+                st.metric("压缩比例", f"{st.session_state.config_target_ratio:.2f}")
+            st.metric("ReAct最大步数", st.session_state.config_react_max_steps)
+            st.caption(f"**触发React关键词**：{st.session_state.config_complex_keywords}")
 
         # ---------- 上传处理逻辑 ----------
         if uploaded_files and len(uploaded_files) > 0:
