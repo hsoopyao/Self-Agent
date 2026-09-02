@@ -1,4 +1,4 @@
-# Core LangChain ecosystem
+# pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple  可使用镜像提速
 langchain>=1.3.0
 langchain-core>=1.5.0
 langchain-text-splitters>=1.1.0
@@ -7,33 +7,18 @@ langchain-openai>=1.5.0
 langchain-huggingface>=1.2.0
 langchain-chroma>=1.1.0
 
-# Vector store & embedding
 chromadb>=1.5.0
 sentence-transformers>=6.0.0
-transformers>=5.15.0
-torch>=2.0.0  # required by sentence-transformers
-torchvision>=0.28.0,<0.29.0
+torch>=2.0.0  # 若 CPU 环境可加 --index-url 指定 CPU 版
 huggingface_hub>=1.28.0
-
-# Web UI & utils
 streamlit>=1.62.0
 python-dotenv>=1.2.0
 tiktoken>=0.14.0
 pypdf>=6.16.0
 tavily-python>=0.7.0
-
-# HTTP / network
 requests>=2.34.0
 httpx>=0.28.0
-aiohttp>=3.14.0
-
-# Data & serialization
-numpy>=2.5.0
-pandas>=3.0.0
 PyYAML>=6.0.0
 pydantic>=2.13.0
-
-# Utilities
 tenacity>=9.1.0
 tqdm>=4.70.0
-python-multipart>=0.0.32
