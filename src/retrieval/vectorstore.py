@@ -1,6 +1,7 @@
 import os
 import tempfile
 import uuid
+import logging
 from typing import List, Dict
 
 from langchain_chroma import Chroma
@@ -10,6 +11,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 
 from src.retrieval.load_docs import load_and_chunk_documents
+
+logger = logging.getLogger(__name__)
 
 # ---------- 常量配置 ----------
 PERSIST_DIR = "./chroma_db"
@@ -48,32 +51,32 @@ def create_vectorstore(auto_load: bool = True):
             embedding_function=embeddings
         )
         if vectorstore._collection.count() > 0:
-            print(f"成功加载已有向量数据库，共 {vectorstore._collection.count()} 条向量。")
+            logger.info(f"成功加载已有向量数据库，共 {vectorstore._collection.count()} 条向量。")
             return vectorstore
         else:
-            print("向量库为空，将创建空库。")
+            logger.info("向量库为空，将创建空库。")
             if auto_load:
-                print("auto_load 开启，从 data/ 目录加载文档...")
+                logger.info("auto_load 开启，从 data/ 目录加载文档...")
                 chunks = load_and_chunk_documents()
                 if chunks:
                     vectorstore.add_documents(chunks)
-                    print(f"已从 data/ 加载 {len(chunks)} 个文本块。")
+                    logger.info(f"已从 data/ 加载 {len(chunks)} 个文本块。")
                 else:
-                    print("data/ 目录无文档，保持空库。")
+                    logger.info("data/ 目录无文档，保持空库。")
             return vectorstore
     except Exception as e:
         # 目录可能不存在，新建
-        print(f"未找到已有向量库，将新建空库。错误: {e}")
+        logger.error(f"未找到已有向量库，将新建空库。错误: {e}")
         vectorstore = Chroma(
             persist_directory=PERSIST_DIR,
             embedding_function=embeddings
         )
         if auto_load:
-            print("auto_load 开启，从 data/ 目录加载文档...")
+            logger.info("auto_load 开启，从 data/ 目录加载文档...")
             chunks = load_and_chunk_documents()
             if chunks:
                 vectorstore.add_documents(chunks)
-                print(f"已从 data/ 加载 {len(chunks)} 个文本块。")
+                logger.info(f"已从 data/ 加载 {len(chunks)} 个文本块。")
         return vectorstore
 
 def get_vectorstore():

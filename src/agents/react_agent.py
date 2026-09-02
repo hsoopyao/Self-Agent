@@ -2,15 +2,17 @@ import json
 import os
 import re
 import streamlit as st
+import logging, traceback
 from typing import Generator, List, Dict, Tuple
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from sqlalchemy.testing.plugin.plugin_base import logging
 
 from src.retrieval.vectorstore import search_with_score
 from src.chat.direct_chat import direct_chat_sync
 from src.core.llm_client import get_llm
 from src.core.config import load_prompt
 from src.chat.general_chat import search_results
+
+logger = logging.getLogger(__name__)
 
 # ---------- 辅助函数：提取摘要 ----------
 def _summarize_text(text: str, max_sentences: int = 2) -> str:
@@ -69,10 +71,8 @@ def execute_web(query: str) -> Tuple[str, str, str]:
         full_content = "\n\n".join(full_parts)
         return summary, source, full_content
     except Exception as e:
-        print(f"execute_web 出错: {e}")
+        logger.error(f"execute_web 出错: {e}")
         # 记录日志
-        import logging, traceback
-        logger = logging.getLogger(__name__)
         logger.error(f"ReAct 循环出错: {traceback.format_exc()}")
         # 用户友好提示
         return "⚠️ 处理请求时出现内部错误，请稍后重试。", "", ""
@@ -85,7 +85,7 @@ def call_tool(tool_name: str, query: str, allow_web: bool = True) -> Tuple[str, 
     """
     统一调用工具，返回 (摘要, 出处, 完整内容)
     """
-    print(f"通过LLM路由并使用执行工具: {tool_name}")
+    logger.info(f"通过LLM路由并使用执行工具: {tool_name}")
     if tool_name == "rag_search":
         return execute_rag(query)
     elif tool_name.startswith("maoyan_"):
@@ -374,7 +374,7 @@ def react_agent(
                     yield f"[OBSERVATION]📊 观察结果：{summary} （出处：{source}）"
                 else:
                     yield f"[OBSERVATION]📊 观察结果：{summary}"
-                print(f"[THOUGHT]💭 思考: {thought} | [ACTION]🔧 调用工具：{tool_name}，参数：{tool_input}")
+                logger.debug(f"[THOUGHT]💭 思考: {thought} | [ACTION]🔧 调用工具：{tool_name}，参数：{tool_input}")
                 # 将完整内容存入 session_state，供预览使用
                 if "observation_details" not in st.session_state:
                     st.session_state.observation_details = []
@@ -401,9 +401,6 @@ def react_agent(
                 return
         except Exception as e:
             error_str = str(e)
-            # 记录日志
-            import logging, traceback
-            logger = logging.getLogger(__name__)
             logger.error(f"ReAct 循环出错: {traceback.format_exc()}")
             # 用户友好提示
             if _is_timeout_error(e):

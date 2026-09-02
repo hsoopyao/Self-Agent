@@ -1,8 +1,11 @@
 import streamlit as st
+import logging
 
 from src.core.config import INTRODUCE
 from src.core.context_manager import count_tokens
 from src.retrieval.vectorstore import chunk_file_from_bytes, create_temp_vectorstore, delete_temp_file_by_filename
+
+logger = logging.getLogger(__name__)
 
 def update_token_display():
     """更新 Token 显示（使用 session_state 中的容器）"""
@@ -110,7 +113,7 @@ def render_sidebar():
                                 failed_files.append(file.name)
                         except Exception as e:
                             failed_files.append(file.name)
-                            print(f"解析文件 {file.name} 失败: {e}")
+                            logger.error(f"解析文件 {file.name} 失败: {e}")
 
                     if failed_files:
                         st.toast(f"⚠️ 以下文件解析失败，已跳过：{', '.join(failed_files)}", icon="⚠️")
