@@ -71,7 +71,7 @@ def fetch_json(url: str) -> dict:
 
 def print_json(obj: dict) -> None:
     """统一 JSON 输出格式（indent=2, ensure_ascii=False）。"""
-    logger.info(json.dumps(obj, ensure_ascii=False, indent=2))
+    logger.debug(json.dumps(obj, ensure_ascii=False, indent=2))
 
 
 # -----------------------------------------------------------------------------

@@ -1,8 +1,12 @@
+import logging
+
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.tools import tool
 
 from src.core.llm_client import get_llm
 from src.core.config import load_prompt
+
+logger = logging.getLogger(__name__)
 
 @tool
 def rag_search(query: str) -> str:
@@ -58,6 +62,7 @@ def route_query(question: str) -> str:
         HumanMessage(content=question)
     ]
     response = llm_with_tools.invoke(messages)
+    logger.debug(f"response.tool_calls: {response.tool_calls}")
     if response.tool_calls:
         tool_name = response.tool_calls[0]["name"]
         if tool_name == "rag_search":
