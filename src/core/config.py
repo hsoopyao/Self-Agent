@@ -13,7 +13,7 @@ DEFAULT_CONFIG = {
     "config_max_tokens": 6000,
     "config_target_ratio": 0.6,
     "config_react_max_steps": 10,
-    "config_complex_keywords": "对比,分析,为什么,总结,评价,区别,影响,解析,解读,解释,研究,排片,影院,电影,上映,场次",
+    "config_complex_keywords": "对比,比较,比对,区别",
     "config_model_name": os.getenv("MODEL_NAME", "glm-4.7-flash"),
     "github_page": "https://github.com/hsoopyao/Self-Agent",
 }

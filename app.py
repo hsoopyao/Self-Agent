@@ -6,6 +6,7 @@ import streamlit as st
 from src.core.config import init_config
 from src.pages.knowledges import main as knowledge_page
 from src.pages.chats import chat_page
+from src.pages.memory_management import memory_management_page
 from src.retrieval.vectorstore import get_vectorstore
 from src.ui.sidebar import render_sidebar
 from src.ui.ui_components import apply_theme
@@ -32,11 +33,12 @@ update_token_display = render_sidebar()
 # 创建页面列表
 page_chat = st.Page(chat_page, title="聊天", icon="💬")
 page_knowledge = st.Page(knowledge_page, title="知识库", icon="📚")
+page_memory = st.Page(memory_management_page, title="记忆管理", icon="🧠")
 page_settings = st.Page("src/pages/settings.py", title="设置", icon="⚙️")
 page_github = st.Page(st.session_state.github_page, title="GitHub", icon="🐙")
 
 # 创建导航（顶部显示）
-pg = st.navigation([page_chat, page_knowledge, page_settings, page_github], position="top")
+pg = st.navigation([page_chat, page_knowledge, page_memory, page_settings, page_github], position="top")
 
 # 运行当前选中的页面
 pg.run()
