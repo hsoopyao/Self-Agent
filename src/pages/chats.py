@@ -22,16 +22,15 @@ from src.retrieval.vectorstore import (
 )
 
 logger = logging.getLogger(__name__)
-EXPLICIT_WEB_KEYWORDS = ("联网搜索", "上网搜索", "搜索网络", "查询网络")
-
-
-def has_explicit_web_consent(query: str) -> bool:
-    """用户明确要求联网时，才允许内部知识查询回退到外部搜索。"""
-    return any(keyword in query for keyword in EXPLICIT_WEB_KEYWORDS)
-
 
 def chat_page():
     st.title("智能助手")
+
+    col1, col2 = st.columns([1, 30])  # 让开关靠右
+    with col1:
+        st.write("")  # 占位
+    with col2:
+        allow_web = st.toggle("🌐 允许联网搜索", value=True, key="allow_web_switch")
 
     if "messages" not in st.session_state:
         st.session_state.messages = [
@@ -89,60 +88,50 @@ def chat_page():
                 # 全局逻辑
                 if stream_gen is None:
                     intent = route_query(user_input)
-                    need_react = False
-                    # 限制 React 只对 rag 和 web 意图生效，chat 不生效
-                    if intent in ["rag", "web"]:
-                        # 读取配置
-                        keywords_str = st.session_state.config_complex_keywords
-                        complex_keywords = [kw.strip() for kw in keywords_str.split(",") if kw.strip()]
-                        if any(kw in user_input for kw in complex_keywords):
-                            need_react = True
-                        if intent == "rag":
-                            has_match, docs, score = search_with_score(user_input, k=1, score_threshold=0.0)
-                            if has_match and score < 0.4:
-                                need_react = True
-
-                        # 用于调试
-                        # print(f"用户输入: {user_input}")
-                        # print(f"intent: {intent}")
-                        # print(f"复杂关键词命中: {any(kw in user_input for kw in complex_keywords)}")
-                        # print(f"need_react 当前值: {need_react}")
-                        # # 打印调用栈，看看谁修改了 need_react
-                        # import traceback
-                        # traceback.print_stack()
-
-                    if need_react:
-                        # 进入 ReAct
-                        stream_gen = react_agent(
-                            user_input,
-                            history,
-                            allow_web=(intent == "web" or has_explicit_web_consent(user_input)),
-                        )
-                    else:
-                        # 原有管道
-                        if intent == "rag":
-                            docs_list = list_documents()
-                            if not docs_list:
-                                stream_gen = iter(["📭 内部知识库为空，请先在侧边栏上传相关 PDF 文档，然后再次提问。"])
+                    logger.debug(f"{user_input}, intent: {intent}")
+                    # 读取关键词配置
+                    keywords_str = st.session_state.config_complex_keywords
+                    complex_keywords = [kw.strip() for kw in keywords_str.split(",") if kw.strip()]
+                    # 搜索内部文件但无对比
+                    if intent == "rag" and not any(kw in user_input for kw in complex_keywords):
+                        docs_list = list_documents()
+                        if not docs_list:
+                            if allow_web:
+                                stream_gen = general_chat_stream(user_input, history=history)
                             else:
-                                has_match, docs, score = search_with_score(
-                                    user_input,
-                                    k=4,
-                                    score_threshold=st.session_state.config_score_threshold,
-                                )
-                                if has_match:
-                                    stream_gen = rag_chain_with_docs(docs, user_input)
-                                elif has_explicit_web_consent(user_input):
+                                stream_gen = iter(["📭 内部知识库为空，请先在侧边栏上传相关 PDF 文档，然后再次提问。"])
+                        else:
+                            has_match, docs, score = search_with_score(
+                                user_input,
+                                k=4,
+                                score_threshold=st.session_state.config_score_threshold,
+                            )
+                            logger.debug(f'{has_match}, docs: {len(docs)}, score: {score}')
+                            if has_match:
+                                stream_gen = rag_chain_with_docs(docs, user_input)
+                            else:
+                                if allow_web:
+                                    logger.debug("no match but allow web...")
                                     stream_gen = general_chat_stream(user_input, history=history)
                                 else:
                                     stream_gen = iter([
                                         "🔒 内部知识库中没有找到足够相关的信息，本次未自动发送到外部网络。"
                                         "如需继续，请在问题中明确写明“联网搜索”。"
                                     ])
-                        elif intent == "web":
-                            stream_gen = general_chat_stream(user_input, history=history)
-                        else:  # chat
-                            stream_gen = direct_chat_stream(user_input, history=history)
+                    elif intent == "chat":
+                        from src.core.memory_manager import get_all_memories
+                        memories = get_all_memories()
+                        memory_context = ""
+                        if memories:
+                            memory_context = "；".join([f"{k}:{v}" for k, v in memories.items()])
+                        stream_gen = direct_chat_stream(user_input, history, memory_context=memory_context)
+                    else:
+                        logger.debug("进入 ReAct")
+                        stream_gen = react_agent(
+                            user_input,
+                            history,
+                            allow_web=allow_web,
+                        )
 
                 # 如果 stream_gen 依然为 None，兜底
                 if stream_gen is None:
