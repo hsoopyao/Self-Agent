@@ -10,10 +10,12 @@ import argparse
 import json
 import re
 import sys
+import logging
 from datetime import datetime
 from urllib.request import Request, urlopen
 from urllib.parse import urlencode
 
+logger = logging.getLogger(__name__)
 # -----------------------------------------------------------------------------
 # 常量（便于维护与 AI 理解）
 # -----------------------------------------------------------------------------
@@ -69,7 +71,7 @@ def fetch_json(url: str) -> dict:
 
 def print_json(obj: dict) -> None:
     """统一 JSON 输出格式（indent=2, ensure_ascii=False）。"""
-    print(json.dumps(obj, ensure_ascii=False, indent=2))
+    logger.debug(json.dumps(obj, ensure_ascii=False, indent=2))
 
 
 # -----------------------------------------------------------------------------

@@ -2,15 +2,19 @@ import json
 import os
 import re
 import streamlit as st
+import logging, traceback
 from typing import Generator, List, Dict, Tuple
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from sqlalchemy.testing.plugin.plugin_base import logging
 
 from src.retrieval.vectorstore import search_with_score
 from src.chat.direct_chat import direct_chat_sync
 from src.core.llm_client import get_llm
 from src.core.config import load_prompt
 from src.chat.general_chat import search_results
+from src.core.memory_manager import get_memory, save_memory
+from src.ui.ui_components import clean_markdown
+
+logger = logging.getLogger(__name__)
 
 # ---------- 辅助函数：提取摘要 ----------
 def _summarize_text(text: str, max_sentences: int = 2) -> str:
@@ -69,10 +73,8 @@ def execute_web(query: str) -> Tuple[str, str, str]:
         full_content = "\n\n".join(full_parts)
         return summary, source, full_content
     except Exception as e:
-        print(f"execute_web 出错: {e}")
+        logger.error(f"execute_web 出错: {e}")
         # 记录日志
-        import logging, traceback
-        logger = logging.getLogger(__name__)
         logger.error(f"ReAct 循环出错: {traceback.format_exc()}")
         # 用户友好提示
         return "⚠️ 处理请求时出现内部错误，请稍后重试。", "", ""
@@ -85,7 +87,7 @@ def call_tool(tool_name: str, query: str, allow_web: bool = True) -> Tuple[str, 
     """
     统一调用工具，返回 (摘要, 出处, 完整内容)
     """
-    print(f"执行工具: {tool_name}")
+    logger.debug(f"通过LLM路由并使用执行工具: {tool_name}")
     if tool_name == "rag_search":
         return execute_rag(query)
     elif tool_name.startswith("maoyan_"):
@@ -94,6 +96,24 @@ def call_tool(tool_name: str, query: str, allow_web: bool = True) -> Tuple[str, 
         if not allow_web:
             return "未获得联网搜索授权，已阻止发送查询。", "", ""
         return execute_web(query)
+    elif tool_name == "remember":
+        # 输入格式: "key|value"
+        parts = query.split("|", 1)
+        if len(parts) == 2:
+            key, value = parts[0].strip(), parts[1].strip()
+            save_memory(key, value)
+            logger.debug(f"save memory: {parts}")
+            return f"已记住 {key} = {value}", "", ""
+        else:
+            return "格式错误，请使用 key|value", "", ""
+    elif tool_name == "recall":
+        key = query.strip()
+        value = get_memory(key)
+        logger.debug(f"get memory: {value}")
+        if value is not None:
+            return f"{key} = {value}", "", ""
+        else:
+            return f"未找到关于 {key} 的记忆", "", ""
     elif tool_name == "direct_chat":
         # direct_chat 直接返回回答，摘要和出处留空
         answer = execute_chat(query)
@@ -243,11 +263,11 @@ def _configured_react_steps() -> int:
     """
     configured = st.session_state.get("config_react_max_steps")
     if configured is None:
-        configured = os.getenv("REACT_MAX_STEPS", "8")
+        configured = os.getenv("REACT_MAX_STEPS", "10")
     try:
         return max(5, min(int(configured), 20))
     except (TypeError, ValueError):
-        return 8
+        return 10
 
 
 def _max_steps_for_query(user_input: str) -> int:
@@ -260,6 +280,47 @@ def _max_steps_for_query(user_input: str) -> int:
         return max(max_steps, 10)
     return max_steps
 
+
+def _is_timeout_error(error: Exception) -> bool:
+    """识别 LLM/HTTP 客户端抛出的超时异常。"""
+    error_text = str(error).lower()
+    error_type = type(error).__name__.lower()
+    return (
+        isinstance(error, TimeoutError)
+        or "timeout" in error_type
+        or "timed out" in error_text
+        or "request timed out" in error_text
+    )
+
+
+def _is_empty_json_list(value: str) -> bool:
+    """判断工具是否返回了空 JSON 数组。"""
+    try:
+        parsed = json.loads(value or "")
+        return isinstance(parsed, list) and not parsed
+    except (TypeError, json.JSONDecodeError):
+        return False
+
+
+def _build_observation_context(tool_name: str, summary: str, full_content: str) -> str:
+    """为下一次 LLM 决策构造紧凑观察，避免重复携带大段猫眼 JSON。"""
+    summary = summary or "无摘要"
+    full_content = full_content or ""
+
+    if tool_name == "maoyan_city_id":
+        # 城市 ID 不一定出现在摘要中，必须保留工具返回值。
+        return f"观察结果（摘要）：{summary}\n观察结果：{full_content[:300]}"
+
+    if tool_name.startswith("maoyan_"):
+        # 猫眼摘要已提取影院/电影 ID、场次和价格；仅在失败时附带少量原始错误。
+        context = f"观察结果（摘要）：{summary}"
+        if "失败" in summary or "错误" in summary:
+            context += f"\n工具返回：{full_content[:600]}"
+        return context
+
+    truncated_full = full_content[:1000] + "..." if len(full_content) > 1000 else full_content
+    return f"观察结果（摘要）：{summary}\n\n观察结果（完整）：{truncated_full}"
+
 # ---------- ReAct 主循环 ----------
 def react_agent(
     user_input: str,
@@ -270,7 +331,7 @@ def react_agent(
     ReAct 循环，生成最终回答（流式输出）。
     每次 yield 一段文本（思考、工具调用、观察、最终答案）。
     """
-    llm = get_llm(streaming=False, temperature=0.1)
+    llm = get_llm(streaming=True, temperature=0.1)
     system_prompt = REACT_SYSTEM
     if not allow_web:
         system_prompt += "\n本次对话未获得联网授权，禁止调用 web_search；仅可使用内部知识库或直接回答。"
@@ -324,12 +385,20 @@ def react_agent(
                     tool_input,
                     allow_web=allow_web,
                 )
+                movie_cinemas_empty = (
+                    tool_name == "maoyan_movie_cinemas"
+                    and _is_empty_json_list(full_content)
+                )
+
+                # 清洗摘要中的markdown
+                clean_summary = clean_markdown(summary)
+
                 # 显示观察结果（摘要 + 出处）
                 if source:
-                    yield f"[OBSERVATION]📊 观察结果：{summary} （出处：{source}）"
+                    yield f"[OBSERVATION]📊 观察结果：{clean_summary} （出处：{source}）"
                 else:
-                    yield f"[OBSERVATION]📊 观察结果：{summary}"
-                print(f"[THOUGHT]💭 思考: {thought} | [ACTION]🔧 调用工具：{tool_name}，参数：{tool_input}")
+                    yield f"[OBSERVATION]📊 观察结果：{clean_summary}"
+                logger.debug(f"[THOUGHT]💭 思考: {thought} | [ACTION]🔧 调用工具：{tool_name}，参数：{tool_input}")
                 # 将完整内容存入 session_state，供预览使用
                 if "observation_details" not in st.session_state:
                     st.session_state.observation_details = []
@@ -340,20 +409,27 @@ def react_agent(
                 })
                 # 将 assistant 的响应和观察结果加入消息历史
                 messages.append(AIMessage(content=content))
-                # 将摘要 + 完整内容（截断）加入历史，避免循环
-                truncated_full = full_content[:1000] + "..." if len(full_content) > 1000 else full_content
-                messages.append(HumanMessage(content=f"观察结果（摘要）：{summary}\n\n观察结果（完整）：{truncated_full}"))
+                observation_context = _build_observation_context(
+                    tool_name,
+                    summary,
+                    full_content,
+                )
+                if movie_cinemas_empty:
+                    observation_context += (
+                        "\n该电影在目标城市没有返回上映影院，这是本次查询的终态。"
+                        "请直接输出 final_answer，不要改查全城影院或逐个影院试探。"
+                    )
+                messages.append(HumanMessage(content=observation_context))
             else:
                 yield "[FINAL]抱歉，我无法继续推理，请重试。"
                 return
         except Exception as e:
             error_str = str(e)
-            # 记录日志
-            import logging, traceback
-            logger = logging.getLogger(__name__)
             logger.error(f"ReAct 循环出错: {traceback.format_exc()}")
             # 用户友好提示
-            if "contentFilter" in error_str or "1301" in error_str:
+            if _is_timeout_error(e):
+                yield "[FINAL]⚠️ 模型请求超时。已保留前面的查询过程，请稍后重试；也可以减少查询影院数量或简化问题。"
+            elif "contentFilter" in error_str or "1301" in error_str:
                 yield "[FINAL]⚠️ 系统检测到输入或生成内容可能包含不安全或敏感内容，请您避免输入易产生敏感内容的提示语，感谢您的配合。"
             else:
                 yield "[FINAL]⚠️ 处理请求时出现内部错误，请稍后重试。"

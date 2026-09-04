@@ -3,15 +3,19 @@ from src.core.llm_client import get_llm
 
 DIRECT_SYSTEM = "你是一个友好的个人助手，名字叫卡卡西。请用口语化、亲切的语气回答用户的闲聊和一般性问题，无需使用外部信息。"
 
-def direct_chat_stream(question: str, history: list = None):
+def direct_chat_stream(question: str, history: list = None, memory_context: str = ""):
     """
     纯聊天（无搜索、无RAG），支持多轮对话。
     :param question: 当前用户问题
     :param history: 历史消息列表，每个元素是 {"role": "user"/"assistant", "content": "..."}
     """
+    system_prompt = DIRECT_SYSTEM
+    if memory_context:
+        system_prompt += f"\n\n用户已知信息：{memory_context}"
+
     # 构建消息列表，系统提示放在最前面
     messages = [
-        SystemMessage(content=DIRECT_SYSTEM),
+        SystemMessage(content=system_prompt),
     ]
 
     # 如果有历史，将历史消息转换为 LangChain 消息对象（只取最近 N 轮，避免超长）

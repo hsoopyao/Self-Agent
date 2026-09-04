@@ -1,8 +1,11 @@
 import streamlit as st
+import logging
 
 from src.core.config import INTRODUCE
 from src.core.context_manager import count_tokens
 from src.retrieval.vectorstore import chunk_file_from_bytes, create_temp_vectorstore, delete_temp_file_by_filename
+
+logger = logging.getLogger(__name__)
 
 def update_token_display():
     """更新 Token 显示（使用 session_state 中的容器）"""
@@ -18,6 +21,7 @@ def update_token_display():
 def render_sidebar():
     """构建并渲染侧边栏，返回 None。"""
     with st.sidebar:
+        allow_web = st.toggle("🌐 允许联网", value=True, key="allow_web_switch")
         # 会话管理
         st.markdown("### 🧹 会话管理")
         if st.button("🗑️ 清空上下文窗口", use_container_width=True):
@@ -26,20 +30,6 @@ def render_sidebar():
 
         st.session_state.token_display = st.empty()
         update_token_display()
-
-        # 配置展示
-        with st.expander("⚙️ 当前配置"):
-            st.markdown(f"**模型**: `{st.session_state.config_model_name}`")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("全局阈值", f"{st.session_state.config_score_threshold:.2f}")
-                st.metric("最大Token", st.session_state.config_max_tokens)
-            with col2:
-                st.metric("临时阈值", f"{st.session_state.config_temp_score_threshold:.2f}")
-                st.metric("压缩比例", f"{st.session_state.config_target_ratio:.2f}")
-            st.caption(f"**触发React关键词**：{st.session_state.config_complex_keywords}")
-
-        st.divider()
 
         st.markdown("## 📎 会话临时文件")
 
@@ -73,6 +63,21 @@ def render_sidebar():
                             st.toast(f"删除失败：{name}", icon="❌")
         else:
             st.caption("无临时文件")
+
+        st.divider()
+
+        # 配置展示
+        with st.expander("⚙️ 当前配置"):
+            st.markdown(f"**模型**: `{st.session_state.config_model_name}`")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("全局阈值", f"{st.session_state.config_score_threshold:.2f}")
+                st.metric("最大Token", st.session_state.config_max_tokens)
+            with col2:
+                st.metric("临时阈值", f"{st.session_state.config_temp_score_threshold:.2f}")
+                st.metric("压缩比例", f"{st.session_state.config_target_ratio:.2f}")
+            st.metric("ReAct最大步数", st.session_state.config_react_max_steps)
+            st.caption(f"**触发React关键词**：{st.session_state.config_complex_keywords}")
 
         # ---------- 上传处理逻辑 ----------
         if uploaded_files and len(uploaded_files) > 0:
@@ -109,7 +114,7 @@ def render_sidebar():
                                 failed_files.append(file.name)
                         except Exception as e:
                             failed_files.append(file.name)
-                            print(f"解析文件 {file.name} 失败: {e}")
+                            logger.error(f"解析文件 {file.name} 失败: {e}")
 
                     if failed_files:
                         st.toast(f"⚠️ 以下文件解析失败，已跳过：{', '.join(failed_files)}", icon="⚠️")

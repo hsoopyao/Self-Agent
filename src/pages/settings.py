@@ -57,6 +57,15 @@ with st.form("settings_form"):
         help="当问题中包含这些关键词时，自动启用 ReAct 多步推理"
     )
 
+    react_max_steps = st.number_input(
+        "ReAct 最大思考步数",
+        min_value=5,
+        max_value=20,
+        value=int(st.session_state.config_react_max_steps),
+        step=1,
+        help="单个问题最多执行的模型决策次数。猫眼排片等多步查询建议设置为 10。"
+    )
+
     st.markdown("### 💻 模型选择")
     model_name = st.text_input(
         "模型名称",
@@ -72,6 +81,7 @@ with st.form("settings_form"):
         st.session_state.config_max_tokens = max_tokens
         st.session_state.config_target_ratio = target_ratio
         st.session_state.config_complex_keywords = complex_keywords
+        st.session_state.config_react_max_steps = int(react_max_steps)
         st.session_state.config_model_name = model_name
         st.toast("设置已保存！", icon="✅")
         st.balloons()

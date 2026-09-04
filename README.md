@@ -62,10 +62,10 @@ self-agent/
 │   │   ├── general_chat.py        # 联网搜索 + 通用对话
 │   │   └── direct_chat.py         # 纯闲聊
 │   ├── ui/                        # UI 组件（不包含页面）
-│   │   ├── components.py          # 卡片渲染函数
+│   │   ├── ui_componentes.py      # 卡片渲染函数
 │   │   └── sidebar.py             # 侧边栏逻辑
 │   └── pages/                     # 独立页面（保持原样，供 st.Page 引用）
-│       ├── chat.py                # 聊天页面（原 chat_page 函数移入）
+│       ├── chats.py               # 聊天页面（原 chat_page 函数移入）
 │       ├── knowledges.py          # 文档管理页面
 │       └── settings.py            # 设置页面
 ├── requirements.txt               # Python 依赖
@@ -102,7 +102,8 @@ self-agent/
 * 最大上下文 Token 数：超过此值将触发历史压缩。
 * 压缩目标比例：压缩后 Token 降至 最大Token * 此比例。
 * ReAct 触发关键词：当问题包含这些词时自动启用多步推理。
-* 模型名称：切换智谱 BigModel 系列模型（需账户权限）。 
+* ReAct 最大思考步数：限制单个问题最多执行的模型决策次数，猫眼排片等多步查询建议设置为 10。
+* 模型名称：切换智谱 BigModel 系列模型（需账户权限）。
 
 调整后点击“保存设置”立即生效，无需重启应用。
 
@@ -129,6 +130,7 @@ self-agent/
 | 临时文件检索阈值 | 会话临时文件匹配敏感度 | 0.3 |
 | 最大上下文 Token 数 | 触发历史压缩的阈值 | 6000 |
 | 压缩目标比例 | 压缩后 Token 降至 最大Token × 此比例 | 0.6 |
+| ReAct 最大思考步数 | 单个问题最多执行的模型决策次数 | 10 |
 | ReAct 触发关键词 | 启用多步推理的关键词列表 | 对比,分析,为什么,总结,评价,比较,区别,影响,解析,解读,解释,研究 |
 | 模型名称 | 智谱 BigModel 系列模型 | glm-4.7-flash |
 

@@ -1,6 +1,7 @@
 import os
 import tempfile
 import uuid
+import logging
 from typing import List, Dict
 
 from langchain_chroma import Chroma
@@ -10,6 +11,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 
 from src.retrieval.load_docs import load_and_chunk_documents
+
+logger = logging.getLogger(__name__)
 
 # ---------- 常量配置 ----------
 PERSIST_DIR = "./chroma_db"
@@ -48,32 +51,32 @@ def create_vectorstore(auto_load: bool = True):
             embedding_function=embeddings
         )
         if vectorstore._collection.count() > 0:
-            print(f"成功加载已有向量数据库，共 {vectorstore._collection.count()} 条向量。")
+            logger.info(f"成功加载已有向量数据库，共 {vectorstore._collection.count()} 条向量。")
             return vectorstore
         else:
-            print("向量库为空，将创建空库。")
+            logger.info("向量库为空，将创建空库。")
             if auto_load:
-                print("auto_load 开启，从 data/ 目录加载文档...")
+                logger.info("auto_load 开启，从 data/ 目录加载文档...")
                 chunks = load_and_chunk_documents()
                 if chunks:
                     vectorstore.add_documents(chunks)
-                    print(f"已从 data/ 加载 {len(chunks)} 个文本块。")
+                    logger.info(f"已从 data/ 加载 {len(chunks)} 个文本块。")
                 else:
-                    print("data/ 目录无文档，保持空库。")
+                    logger.info("data/ 目录无文档，保持空库。")
             return vectorstore
     except Exception as e:
         # 目录可能不存在，新建
-        print(f"未找到已有向量库，将新建空库。错误: {e}")
+        logger.error(f"未找到已有向量库，将新建空库。错误: {e}")
         vectorstore = Chroma(
             persist_directory=PERSIST_DIR,
             embedding_function=embeddings
         )
         if auto_load:
-            print("auto_load 开启，从 data/ 目录加载文档...")
+            logger.info("auto_load 开启，从 data/ 目录加载文档...")
             chunks = load_and_chunk_documents()
             if chunks:
                 vectorstore.add_documents(chunks)
-                print(f"已从 data/ 加载 {len(chunks)} 个文本块。")
+                logger.info(f"已从 data/ 加载 {len(chunks)} 个文本块。")
         return vectorstore
 
 def get_vectorstore():
@@ -105,7 +108,7 @@ def search_with_score(query: str, k: int = 2, score_threshold: float = 0.5):
     return True, docs, top_score
 
 # ---------- 知识库导入函数 ----------
-def chunk_pdf_from_bytes(file_bytes: bytes, filename: str) -> List[Document]:
+def chunk_pdf_from_bytes(file_bytes: bytes, filename: str, category: str = "未分类") -> List[Document]:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file_bytes)
         tmp_path = tmp.name
@@ -123,6 +126,7 @@ def chunk_pdf_from_bytes(file_bytes: bytes, filename: str) -> List[Document]:
     chunks = text_splitter.split_documents(docs)
     for chunk in chunks:
         chunk.metadata["filename"] = filename
+        chunk.metadata["category"] = category
     return chunks
 
 # ---------- 临时会话文件导入函数 ----------
@@ -175,21 +179,24 @@ def list_documents() -> List[Dict[str, str]]:
         collection = vectorstore._collection
         result = collection.get()
         metadata = result.get("metadatas", [])
-        filenames = set()
+        doc_map = {}
         for meta in metadata:
-            if meta:
-                # 优先使用 filename 字段
-                filename = meta.get("filename")
-                # 若不存在，尝试从 source 提取（兼容旧数据）
-                if not filename:
-                    source = meta.get("source")
-                    if source:
-                        filename = os.path.basename(source)
-                if filename:
-                    filenames.add(filename)
-        return [{"id": fname, "filename": fname} for fname in filenames]
+            if not meta:
+                continue
+            filename = meta.get("filename")
+            if not filename:
+                source = meta.get("source")
+                if source:
+                    filename = os.path.basename(source)
+            if filename:
+                category = meta.get("category", "未分类")
+                # 如果同一个文件有多个chunk，保留首次遇到的分类（假设同文件分类一致）
+                if filename not in doc_map:
+                    doc_map[str(filename)] = category
+        # 转换为列表
+        return [{"filename": fname, "category": cat} for fname, cat in doc_map.items()]
     except Exception as e:
-        print(f"获取文档列表失败: {e}")
+        logger.error(f"获取文档列表失败: {e}")
         return []
 
 def delete_document_by_filename(filename: str) -> bool:
