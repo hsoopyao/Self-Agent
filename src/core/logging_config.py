@@ -15,7 +15,7 @@ LOG_LEVELS = {
     "ERROR": logging.ERROR,
     "CRITICAL": logging.CRITICAL,
 }
-LOG_LEVEL = LOG_LEVELS.get(DEFAULT_LOG_LEVEL, logging.INFO)
+LOG_LEVEL = LOG_LEVELS.get(DEFAULT_LOG_LEVEL, logging.DEBUG)
 
 # 日志格式
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
