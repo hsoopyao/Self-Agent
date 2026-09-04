@@ -12,6 +12,7 @@ from src.core.llm_client import get_llm
 from src.core.config import load_prompt
 from src.chat.general_chat import search_results
 from src.core.memory_manager import get_memory, save_memory
+from src.ui.ui_components import clean_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -388,11 +389,15 @@ def react_agent(
                     tool_name == "maoyan_movie_cinemas"
                     and _is_empty_json_list(full_content)
                 )
+
+                # 清洗摘要中的markdown
+                clean_summary = clean_markdown(summary)
+
                 # 显示观察结果（摘要 + 出处）
                 if source:
-                    yield f"[OBSERVATION]📊 观察结果：{summary} （出处：{source}）"
+                    yield f"[OBSERVATION]📊 观察结果：{clean_summary} （出处：{source}）"
                 else:
-                    yield f"[OBSERVATION]📊 观察结果：{summary}"
+                    yield f"[OBSERVATION]📊 观察结果：{clean_summary}"
                 logger.debug(f"[THOUGHT]💭 思考: {thought} | [ACTION]🔧 调用工具：{tool_name}，参数：{tool_input}")
                 # 将完整内容存入 session_state，供预览使用
                 if "observation_details" not in st.session_state:
