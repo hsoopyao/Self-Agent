@@ -7,7 +7,7 @@ LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 
 # 默认日志级别可从环境变量读取
-DEFAULT_LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+DEFAULT_LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
 LOG_LEVELS = {
     "DEBUG": logging.DEBUG,
     "INFO": logging.INFO,
@@ -64,8 +64,8 @@ def setup_logging():
     # 但两种方式选一种即可，这里使用大小轮转
 
     # 降低第三方库的日志噪音
-    for lib in ["urllib3", "httpx", "httpx2", "httpcore", "openai", "tavily"]:
-        logging.getLogger(lib).setLevel(logging.WARNING)
+    for lib in ["urllib3", "httpx", "httpx2", "httpcore", "httpcore2", "openai", "tavily"]:
+        logging.getLogger(lib).setLevel(logging.INFO)
 
     return root_logger
 
