@@ -65,7 +65,7 @@ def setup_logging():
 
     # 降低第三方库的日志噪音
     for lib in ["urllib3", "httpx", "httpx2", "httpcore", "httpcore2", "openai", "tavily"]:
-        logging.getLogger(lib).setLevel(logging.INFO)
+        logging.getLogger(lib).setLevel(logging.WARNING)
 
     return root_logger
 
