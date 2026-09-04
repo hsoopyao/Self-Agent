@@ -83,6 +83,8 @@ def chat_page():
                 if stream_gen is None:
                     intent = route_query(user_input)
                     logger.debug(f"{user_input}, intent: {intent}")
+                    # 获取联网开关
+                    allow_web = st.session_state.allow_web_switch
                     # 读取关键词配置
                     keywords_str = st.session_state.config_complex_keywords
                     complex_keywords = [kw.strip() for kw in keywords_str.split(",") if kw.strip()]
