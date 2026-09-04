@@ -21,6 +21,7 @@ def update_token_display():
 def render_sidebar():
     """构建并渲染侧边栏，返回 None。"""
     with st.sidebar:
+        allow_web = st.toggle("🌐 允许联网", value=True, key="allow_web_switch")
         # 会话管理
         st.markdown("### 🧹 会话管理")
         if st.button("🗑️ 清空上下文窗口", use_container_width=True):

@@ -11,6 +11,7 @@ from src.chat.direct_chat import direct_chat_sync
 from src.core.llm_client import get_llm
 from src.core.config import load_prompt
 from src.chat.general_chat import search_results
+from src.core.memory_manager import get_memory, save_memory
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ def call_tool(tool_name: str, query: str, allow_web: bool = True) -> Tuple[str, 
     """
     统一调用工具，返回 (摘要, 出处, 完整内容)
     """
-    logger.info(f"通过LLM路由并使用执行工具: {tool_name}")
+    logger.debug(f"通过LLM路由并使用执行工具: {tool_name}")
     if tool_name == "rag_search":
         return execute_rag(query)
     elif tool_name.startswith("maoyan_"):
@@ -94,6 +95,24 @@ def call_tool(tool_name: str, query: str, allow_web: bool = True) -> Tuple[str, 
         if not allow_web:
             return "未获得联网搜索授权，已阻止发送查询。", "", ""
         return execute_web(query)
+    elif tool_name == "remember":
+        # 输入格式: "key|value"
+        parts = query.split("|", 1)
+        if len(parts) == 2:
+            key, value = parts[0].strip(), parts[1].strip()
+            save_memory(key, value)
+            logger.debug(f"save memory: {parts}")
+            return f"已记住 {key} = {value}", "", ""
+        else:
+            return "格式错误，请使用 key|value", "", ""
+    elif tool_name == "recall":
+        key = query.strip()
+        value = get_memory(key)
+        logger.debug(f"get memory: {value}")
+        if value is not None:
+            return f"{key} = {value}", "", ""
+        else:
+            return f"未找到关于 {key} 的记忆", "", ""
     elif tool_name == "direct_chat":
         # direct_chat 直接返回回答，摘要和出处留空
         answer = execute_chat(query)
