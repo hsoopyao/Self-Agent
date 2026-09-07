@@ -1,4 +1,5 @@
 import sqlite3
+import json
 import os
 from typing import Dict, List, Optional
 
@@ -58,3 +59,34 @@ def clear_all_memories() -> None:
     conn.execute("DELETE FROM memory")
     conn.commit()
     conn.close()
+
+def get_categories() -> List[str]:
+    """获取所有分类（包括空分类）"""
+    data = get_memory("categories")
+    if data:
+        try:
+            return json.loads(data)
+        except:
+            return []
+    return []
+
+def save_categories(categories: List[str]):
+    """保存分类列表"""
+    save_memory("categories", json.dumps(categories))
+
+def add_category(category: str):
+    categories = get_categories()
+    if category and category not in categories:
+        categories.append(category)
+        save_categories(categories)
+        return True
+    return False
+
+def delete_category(category: str):
+    """删除分类（仅从分类列表中移除，不影响已有文档）"""
+    categories = get_categories()
+    if category in categories:
+        categories.remove(category)
+        save_categories(categories)
+        return True
+    return False
