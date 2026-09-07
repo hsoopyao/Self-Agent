@@ -1,4 +1,5 @@
 import os
+import streamlit as st
 import tempfile
 import uuid
 import logging
@@ -15,7 +16,7 @@ from src.retrieval.load_docs import load_and_chunk_documents
 logger = logging.getLogger(__name__)
 
 # ---------- 常量配置 ----------
-PERSIST_DIR = "./chroma_db"
+PERSIST_DIR = "./db/chroma_db"
 EMBEDDING_MODEL_NAME = os.getenv(
     "EMBEDDING_MODEL_PATH",
     "BAAI/bge-small-zh-v1.5"
@@ -89,6 +90,34 @@ def get_vectorstore():
         else:
             _vectorstore = create_vectorstore(auto_load=False)
     return _vectorstore
+
+def ensure_vectorstore_loaded() -> bool:
+    """
+    确保向量库已加载，并显示加载状态。
+    返回 True 表示加载成功，False 表示失败。
+    """
+    # 如果已经加载成功，直接返回
+    if st.session_state.get("vectorstore_loaded", False):
+        return True
+
+    # 如果之前加载失败，直接返回 False，不重复尝试（可添加重试逻辑）
+    if st.session_state.get("vectorstore_error"):
+        st.error(f"⚠️ 向量库加载失败：{st.session_state.vectorstore_error}")
+        return False
+
+    # 开始加载
+    try:
+        with st.spinner("⏳ 正在加载向量库和 Embedding 模型，请稍候..."):
+            # 实际加载（可能会耗时）
+            _ = get_vectorstore()  # 触发加载
+        st.session_state.vectorstore_loaded = True
+        st.session_state.vectorstore_error = None
+        st.toast("✅ 向量库加载成功", icon="✅")
+        return True
+    except Exception as e:
+        st.session_state.vectorstore_error = str(e)
+        st.error(f"❌ 向量库加载失败：{e}")
+        return False
 
 # ---------- 检索函数 ----------
 def get_retriever(vectorstore=None, k: int = 2):

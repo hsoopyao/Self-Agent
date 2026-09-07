@@ -2,7 +2,9 @@ import sqlite3
 import os
 from typing import Dict, List, Optional
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "../db/memory.db")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))          # .../src/core
+PROJECT_ROOT = os.path.dirname(os.path.dirname(BASE_DIR))      # .../Self-Agent
+DB_PATH = os.path.join(PROJECT_ROOT, "./db/memory.db")              # 直接放在根目录
 
 def get_connection():
     """获取数据库连接，自动创建表"""
