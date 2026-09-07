@@ -5,6 +5,7 @@ import streamlit as st
 
 from src.core.context_manager import count_tokens, trim_history
 from src.core.config import INTRODUCE
+from src.core.memory_manager import get_all_memories
 from src.chat.direct_chat import direct_chat_stream
 from src.chat.general_chat import general_chat_stream
 from src.retrieval.rag_chain import rag_chain_with_docs
@@ -89,43 +90,45 @@ def chat_page():
                     # 读取关键词配置
                     keywords_str = st.session_state.config_complex_keywords
                     complex_keywords = [kw.strip() for kw in keywords_str.split(",") if kw.strip()]
-                    # 搜索内部文件但无对比
-                    if intent == "rag" and not any(kw in user_input for kw in complex_keywords):
-                        # 确保向量库已加载
-                        if not ensure_vectorstore_loaded():
-                            stream_gen = iter(["⚠️ 向量库加载失败，无法检索本地知识。"])
-                        else:
-                            docs_list = list_documents()
-                            if not docs_list:
-                                if allow_web:
-                                    stream_gen = general_chat_stream(user_input, history=history)
-                                else:
-                                    stream_gen = iter(["📭 内部知识库为空，请先在侧边栏上传相关 PDF 文档，然后再次提问。"])
+                    # 无命中React关键词
+                    if not any(kw in user_input for kw in complex_keywords):
+                        if intent == "rag":
+                            # 确保向量库已加载
+                            if not ensure_vectorstore_loaded():
+                                stream_gen = iter(["⚠️ 向量库加载失败，无法检索本地知识。"])
                             else:
-                                has_match, docs, score = search_with_score(
-                                    user_input,
-                                    k=4,
-                                    score_threshold=st.session_state.config_score_threshold,
-                                )
-                                logger.debug(f'{has_match}, docs: {len(docs)}, score: {score}')
-                                if has_match:
-                                    stream_gen = rag_chain_with_docs(docs, user_input)
-                                else:
+                                docs_list = list_documents()
+                                if not docs_list:
                                     if allow_web:
-                                        logger.debug("no match but allow web...")
                                         stream_gen = general_chat_stream(user_input, history=history)
                                     else:
-                                        stream_gen = iter([
-                                            "🔒 内部知识库中没有找到足够相关的信息，本次未自动发送到外部网络。"
-                                            "如需继续，请在问题中明确写明“联网搜索”。"
-                                        ])
-                    elif intent == "chat":
-                        from src.core.memory_manager import get_all_memories
-                        memories = get_all_memories()
-                        memory_context = ""
-                        if memories:
-                            memory_context = "；".join([f"{k}:{v}" for k, v in memories.items()])
-                        stream_gen = direct_chat_stream(user_input, history, memory_context=memory_context)
+                                        stream_gen = iter(["📭 内部知识库为空，请先在侧边栏上传相关 PDF 文档，然后再次提问。"])
+                                else:
+                                    has_match, docs, score = search_with_score(
+                                        user_input,
+                                        k=4,
+                                        score_threshold=st.session_state.config_score_threshold,
+                                    )
+                                    logger.debug(f'{has_match}, docs: {len(docs)}, score: {score}')
+                                    if has_match:
+                                        stream_gen = rag_chain_with_docs(docs, user_input)
+                                    else:
+                                        if allow_web:
+                                            logger.debug("no match but allow web...")
+                                            stream_gen = general_chat_stream(user_input, history=history)
+                                        else:
+                                            stream_gen = iter([
+                                                "🔒 内部知识库中没有找到足够相关的信息，本次未自动发送到外部网络。"
+                                                "如需继续，请在问题中明确写明“联网搜索”。"
+                                            ])
+                        elif intent == "chat":
+                            memories = get_all_memories()
+                            memory_context = ""
+                            if memories:
+                                memory_context = "；".join([f"{k}:{v}" for k, v in memories.items()])
+                            stream_gen = direct_chat_stream(user_input, history, memory_context=memory_context)
+                        else:
+                            stream_gen = react_agent(user_input, history, allow_web=allow_web)
                     else:
                         logger.debug("进入 ReAct")
                         stream_gen = react_agent(
