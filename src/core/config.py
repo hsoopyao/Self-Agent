@@ -13,7 +13,7 @@ DEFAULT_CONFIG = {
     "config_max_tokens": 6000,
     "config_target_ratio": 0.6,
     "config_react_max_steps": 10,
-    "config_complex_keywords": "对比,比较,比对,区别",
+    "config_complex_keywords": "对比,比较,比对,区别,记住,记得,常住,常驻",
     "config_model_name": os.getenv("MODEL_NAME", "glm-4.7-flash"),
     "github_page": "https://github.com/hsoopyao/Self-Agent",
 }
