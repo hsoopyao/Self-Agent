@@ -2,11 +2,16 @@ import streamlit as st
 import logging
 
 from src.retrieval.vectorstore import list_documents, add_documents_to_store, delete_document_by_filename, chunk_pdf_from_bytes
+from src.retrieval.vectorstore import ensure_vectorstore_loaded
 
 logger = logging.getLogger(__name__)
 
 def main():
     st.title("📚 知识库")
+
+    # 确保向量库已加载（若失败则提示并返回）
+    if not ensure_vectorstore_loaded():
+        st.stop()  # 停止渲染，避免后续操作
 
     # 定义预置分类
     CATEGORIES = ["项目", "工作", "学习", "内部政策资料", "未分类"]

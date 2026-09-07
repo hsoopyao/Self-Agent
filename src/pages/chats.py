@@ -16,6 +16,7 @@ from src.ui.ui_components import (
     render_observation,
     render_thought,
 )
+from src.retrieval.vectorstore import ensure_vectorstore_loaded
 from src.retrieval.vectorstore import (
     list_documents,
     search_with_score,
@@ -90,30 +91,34 @@ def chat_page():
                     complex_keywords = [kw.strip() for kw in keywords_str.split(",") if kw.strip()]
                     # 搜索内部文件但无对比
                     if intent == "rag" and not any(kw in user_input for kw in complex_keywords):
-                        docs_list = list_documents()
-                        if not docs_list:
-                            if allow_web:
-                                stream_gen = general_chat_stream(user_input, history=history)
-                            else:
-                                stream_gen = iter(["📭 内部知识库为空，请先在侧边栏上传相关 PDF 文档，然后再次提问。"])
+                        # 确保向量库已加载
+                        if not ensure_vectorstore_loaded():
+                            stream_gen = iter(["⚠️ 向量库加载失败，无法检索本地知识。"])
                         else:
-                            has_match, docs, score = search_with_score(
-                                user_input,
-                                k=4,
-                                score_threshold=st.session_state.config_score_threshold,
-                            )
-                            logger.debug(f'{has_match}, docs: {len(docs)}, score: {score}')
-                            if has_match:
-                                stream_gen = rag_chain_with_docs(docs, user_input)
-                            else:
+                            docs_list = list_documents()
+                            if not docs_list:
                                 if allow_web:
-                                    logger.debug("no match but allow web...")
                                     stream_gen = general_chat_stream(user_input, history=history)
                                 else:
-                                    stream_gen = iter([
-                                        "🔒 内部知识库中没有找到足够相关的信息，本次未自动发送到外部网络。"
-                                        "如需继续，请在问题中明确写明“联网搜索”。"
-                                    ])
+                                    stream_gen = iter(["📭 内部知识库为空，请先在侧边栏上传相关 PDF 文档，然后再次提问。"])
+                            else:
+                                has_match, docs, score = search_with_score(
+                                    user_input,
+                                    k=4,
+                                    score_threshold=st.session_state.config_score_threshold,
+                                )
+                                logger.debug(f'{has_match}, docs: {len(docs)}, score: {score}')
+                                if has_match:
+                                    stream_gen = rag_chain_with_docs(docs, user_input)
+                                else:
+                                    if allow_web:
+                                        logger.debug("no match but allow web...")
+                                        stream_gen = general_chat_stream(user_input, history=history)
+                                    else:
+                                        stream_gen = iter([
+                                            "🔒 内部知识库中没有找到足够相关的信息，本次未自动发送到外部网络。"
+                                            "如需继续，请在问题中明确写明“联网搜索”。"
+                                        ])
                     elif intent == "chat":
                         from src.core.memory_manager import get_all_memories
                         memories = get_all_memories()

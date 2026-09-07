@@ -24,7 +24,7 @@ init_config()
 apply_theme()
 
 # 启动时初始化向量库（后台加载）
-get_vectorstore()
+# get_vectorstore()
 
 # 构建侧边栏
 update_token_display = render_sidebar()
