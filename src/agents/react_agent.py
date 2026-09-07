@@ -11,7 +11,6 @@ from src.chat.direct_chat import direct_chat_sync
 from src.core.llm_client import get_llm
 from src.core.config import load_prompt
 from src.chat.general_chat import search_results
-from src.core.memory_manager import get_memory, save_memory
 from src.ui.ui_components import clean_markdown
 
 logger = logging.getLogger(__name__)
@@ -90,30 +89,10 @@ def call_tool(tool_name: str, query: str, allow_web: bool = True) -> Tuple[str, 
     logger.debug(f"通过LLM路由并使用执行工具: {tool_name}")
     if tool_name == "rag_search":
         return execute_rag(query)
-    elif tool_name.startswith("maoyan_"):
-        return execute_maoyan_tool(tool_name, query)
     elif tool_name == "web_search":
         if not allow_web:
             return "未获得联网搜索授权，已阻止发送查询。", "", ""
         return execute_web(query)
-    elif tool_name == "remember":
-        # 输入格式: "key|value"
-        parts = query.split("|", 1)
-        if len(parts) == 2:
-            key, value = parts[0].strip(), parts[1].strip()
-            save_memory(key, value)
-            logger.debug(f"save memory: {parts}")
-            return f"已记住 {key} = {value}", "", ""
-        else:
-            return "格式错误，请使用 key|value", "", ""
-    elif tool_name == "recall":
-        key = query.strip()
-        value = get_memory(key)
-        logger.debug(f"get memory: {value}")
-        if value is not None:
-            return f"{key} = {value}", "", ""
-        else:
-            return f"未找到关于 {key} 的记忆", "", ""
     elif tool_name == "direct_chat":
         # direct_chat 直接返回回答，摘要和出处留空
         answer = execute_chat(query)
@@ -435,83 +414,3 @@ def react_agent(
                 yield "[FINAL]⚠️ 处理请求时出现内部错误，请稍后重试。"
             return
     yield "[FINAL]⚠️ 超出最大思考步数，请简化问题。"
-
-from src.agents.movie_tool import (
-    get_city_id,
-    search_cinemas,
-    get_cinema_showtimes,
-    search_movie,
-    get_movie_cinemas,
-    extract_cinema_summary,
-    extract_movie_summary,
-    extract_showtime_summary,
-)
-
-def execute_maoyan_tool(tool_name: str, tool_input: str) -> Tuple[str, str, str]:
-    """
-    执行猫眼工具，返回 (摘要, 出处, 完整内容)
-    """
-    try:
-        if tool_name == "maoyan_city_id":
-            success, result = get_city_id(tool_input)
-            summary = f"城市ID查询{'成功' if success else '失败'}"
-            return summary, "", result if not success else f"城市 {tool_input} 的 ID 为 {result}"
-
-        elif tool_name == "maoyan_search_cinemas":
-            # 输入格式: "city_id|lat|lng|keyword" 或 "city_id"
-            parts = tool_input.split("|")
-            city_id = parts[0].strip()
-            if len(parts) > 2:
-                lat = parts[1].strip()
-                lng = parts[2].strip()
-                success, result = search_cinemas(city_id, "", lat, lng)
-            else:
-                keyword = parts[1].strip() if len(parts) > 1 else ""
-                success, result = search_cinemas(city_id, keyword)
-            if success:
-                summary = extract_cinema_summary(result)
-            else:
-                summary = "查询失败"
-            return summary, "", result
-
-        elif tool_name == "maoyan_showtimes":
-            # 输入格式: "cinema_id|city_id" 或 "cinema_id"
-            parts = tool_input.split("|")
-            cinema_id = parts[0].strip()
-            city_id = parts[1].strip() if len(parts) > 1 else ""
-            success, result = get_cinema_showtimes(cinema_id, city_id)
-            if success:
-                summary = extract_showtime_summary(result)
-            else:
-                summary = "查询失败"
-            return summary, "", result
-
-        elif tool_name == "maoyan_search_movie":
-            # 输入格式: "movie_name|city_id"
-            parts = tool_input.split("|")
-            movie_name = parts[0].strip()
-            city_id = parts[1].strip() if len(parts) > 1 else ""
-            success, result = search_movie(movie_name, city_id)
-            if success:
-                summary = extract_movie_summary(result)
-            else:
-                summary = "查询失败"
-            return summary, "", result
-
-        elif tool_name == "maoyan_movie_cinemas":
-            # 输入格式: "movie_id|city_id"
-            parts = tool_input.split("|")
-            movie_id = parts[0].strip()
-            city_id = parts[1].strip() if len(parts) > 1 else ""
-            success, result = get_movie_cinemas(movie_id, city_id)
-            if success:
-                summary = extract_cinema_summary(result)
-            else:
-                summary = "查询失败"
-            return summary, "", result
-
-        else:
-            return f"未知猫眼工具: {tool_name}", "", ""
-    except Exception as e:
-        logging.error(f"执行猫眼工具失败: {e}")
-        return f"⚠️ 查询失败: {str(e)}", "", ""
