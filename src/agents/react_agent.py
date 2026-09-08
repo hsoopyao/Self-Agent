@@ -338,10 +338,6 @@ def react_agent(
                     tool_input,
                     allow_web=allow_web,
                 )
-                movie_cinemas_empty = (
-                    tool_name == "maoyan_movie_cinemas"
-                    and _is_empty_json_list(full_content)
-                )
 
                 # 清洗摘要中的markdown
                 clean_summary = clean_markdown(summary)
