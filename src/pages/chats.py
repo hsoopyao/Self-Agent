@@ -79,6 +79,32 @@ def chat_page():
                         stream_gen = rag_chain_with_docs(docs, user_input)
                     else:
                         st.caption("💡 临时文件中未找到相关信息，转为全局检索。")
+                # 将当前问题与最近的对话历史结合，生成一个更完整的查询词
+                def enrich_query_with_history(query: str, history: list) -> str:
+                    """
+                    根据最近的历史消息，补全当前查询中的指代词。
+                    例如：如果历史中提到了某个文件名，且当前查询包含“资料”，则补全文件名。
+                    """
+                    import re
+
+                    # 如果查询已经包含明确的文件名或版本号，直接返回原查询
+                    if re.search(r'\.pdf|V\d+\.\d+|\d+\.\d+\.\d+', query, re.IGNORECASE):
+                        return query
+
+                    # 从历史中提取最近出现的文件名/版本号（取最近3条消息）
+                    for msg in reversed(history[-6:]):  # 最近6条消息（3轮）
+                        if msg["role"] == "assistant" or msg["role"] == "user":
+                            content = msg["content"]
+                            # 提取文件名（包含 .pdf）或版本号（如 V3.1.1.1）
+                            match = re.search(r'([\w\-_]+\.pdf|V\d+\.\d+\.\d+\.\d+|[A-Z]_\d+\.\d+\.\d+)', content,
+                                              re.IGNORECASE)
+                            if match:
+                                file_ref = match.group(1)
+                                # 如果当前查询包含指代词（如“资料”、“文件”、“文档”），则补全
+                                if any(kw in query for kw in ["资料", "文件", "文档", "该", "此", "这个"]):
+                                    return f"{file_ref} {query}"
+                                break
+                    return query
 
                 # 全局逻辑
                 if stream_gen is None:
@@ -104,8 +130,10 @@ def chat_page():
                                     else:
                                         stream_gen = iter(["📭 内部知识库为空，请先在侧边栏上传相关 PDF 文档，然后再次提问。"])
                                 else:
+                                    # 在 RAG 分支中，调用检索前
+                                    enriched_query = enrich_query_with_history(user_input, history)
                                     has_match, docs, score = search_with_score(
-                                        user_input,
+                                        enriched_query,
                                         k=4,
                                         score_threshold=st.session_state.config_score_threshold,
                                     )

@@ -1,3 +1,4 @@
+import re
 import logging
 
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -28,27 +29,54 @@ tools = [rag_search, web_search, direct_chat]
 # 路由提示词 加载 Prompt
 ROUTER_SYSTEM = load_prompt("router_system.txt")
 
+def is_rag_query(question: str) -> bool:
+    q_lower = question.lower()
+    # 1. 硬编码关键词（可扩展，建议从配置文件加载）
+    rag_keywords = [
+        "文档", "政策", "制度", "手册", "说明", "文件", "资料",
+        "项目", "需求", "规格", "报告", "流程", "指南", "标准",
+        "规范", "条款", "版本", "变更", "记录", "方案", "计划",
+        "总结", "分析", "设计", "架构", "代码", "测试", "部署",
+        "运维", "内部", "公司", "规定", "部门", "岗位", "职责"
+    ]
+    if any(kw in q_lower for kw in rag_keywords):
+        return True
+
+    # 2. 正则模式：版本号、章节编号、专业术语
+    patterns = [
+        r'v?\d+\.\d+(\.\d+)*',        # 版本号如 v3.1.1.1
+        r'第[一二三四五六七八九十百千万]+[章节]',  # 第X章/节
+        r'\d+\.\d+\.\d+',             # 纯数字版本如 3.1.1
+        r'[A-Z]{2,}[-\s]?\d+',        # 业务代码如 PR-123
+        r'需求|規格|spec|requirement', # 中英文需求词
+    ]
+    for pat in patterns:
+        if re.search(pat, question, re.IGNORECASE):
+            return True
+
+    # 3. 判断问题长度（较长的技术性提问倾向知识库）
+    if len(question.strip()) > 30:
+        return True
+
+    # 4. 默认为 False（即非 RAG）
+    return False
+
 def route_query(question: str) -> str:
     """返回 'rag' / 'web' / 'chat'，通过规则优先匹配，未命中再调用 LLM。"""
     q_lower = question.lower().strip()
 
     # ---------- 规则匹配（高频场景） ----------
-    # 1. 电影/排片/影院
-    movie_keywords = ["排片", "影院", "电影院", "电影", "场次", "猫眼", "上映"]
-    if any(kw in q_lower for kw in movie_keywords):
-        return "web"   # 后续会触发 ReAct（见 chat_page 中的 need_react 逻辑）
 
-    # 2. 天气
+    # 天气
     weather_keywords = ["天气", "温度", "预报", "下雨", "晴", "多云", "气温"]
     if any(kw in q_lower for kw in weather_keywords):
         return "web"
 
-    # 3. 内部知识库（文档、政策等）
-    rag_keywords = ["文档", "政策", "公司", "内部", "规定", "制度", "手册", "说明"]
-    if any(kw in q_lower for kw in rag_keywords):
+    # 内部知识库（文档、政策等）
+    if is_rag_query:
         return "rag"
 
-    # 4. 闲聊/问候（可简单判断，或直接走 chat 兜底）
+    # 闲聊/问候（可简单判断，或直接走 chat 兜底）
     chat_keywords = ["你好", "介绍", "你是谁", "功能", "能力"]
     if any(kw in q_lower for kw in chat_keywords):
         return "chat"
