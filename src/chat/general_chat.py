@@ -13,7 +13,10 @@ from src.core.llm_client import get_llm
 from src.core.config import load_prompt
 
 GENERAL_SYSTEM = load_prompt("general_system.txt")
-GENERAL_USER_TEMPLATE = load_prompt("general_user.txt")
+GENERAL_USER_TEMPLATE = """
+问题：{question}
+搜索到的信息：{search_info}
+"""
 logger = logging.getLogger(__name__)
 
 
