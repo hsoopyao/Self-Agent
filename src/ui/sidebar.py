@@ -3,7 +3,7 @@ import logging
 
 from src.core.config import INTRODUCE
 from src.core.context_manager import count_tokens
-from src.retrieval.vectorstore import chunk_file_from_bytes, create_temp_vectorstore, delete_temp_file_by_filename
+from src.retrieval.vectorstore import list_documents
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,22 @@ def render_sidebar():
 
         st.session_state.token_display = st.empty()
         update_token_display()
-
+        st.divider()
+        with st.expander("📚 知识库文档列表", expanded=False):
+            docs = list_documents()
+            if not docs:
+                st.caption("暂无文档")
+            else:
+                # 按分类分组
+                grouped = {}
+                for doc in docs:
+                    cat = doc.get("category", "未分类")
+                    grouped.setdefault(cat, []).append(doc["filename"])
+                for cat, files in grouped.items():
+                    st.markdown(f"**{cat}** ({len(files)})")
+                    for fname in files:
+                        st.caption(f"• {fname}")
+        st.divider()
         # 配置展示
         with st.expander("⚙️ 当前配置"):
             st.markdown(f"**模型**: `{st.session_state.config_model_name}`")
@@ -39,9 +54,8 @@ def render_sidebar():
                 st.metric("全局阈值", f"{st.session_state.config_score_threshold:.2f}")
                 st.metric("最大Token", st.session_state.config_max_tokens)
             with col2:
-                st.metric("临时阈值", f"{st.session_state.config_temp_score_threshold:.2f}")
                 st.metric("压缩比例", f"{st.session_state.config_target_ratio:.2f}")
-            st.metric("ReAct最大步数", st.session_state.config_react_max_steps)
+                st.metric("ReAct最大步数", st.session_state.config_react_max_steps)
             st.caption(f"**触发React关键词**：{st.session_state.config_complex_keywords}")
 
         # 最后将 update_token_display 暴露给外部（以便在 chat_page 完成后调用）

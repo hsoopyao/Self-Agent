@@ -1,10 +1,8 @@
 import os
 import streamlit as st
 import tempfile
-import uuid
 import logging
 from typing import List, Dict
-
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
@@ -232,7 +230,12 @@ def delete_document_by_filename(filename: str) -> bool:
     try:
         vectorstore = get_vectorstore()
         collection = vectorstore._collection
-        collection.delete(where={"filename": filename})
+        collection.delete(where={
+            "$or": [
+                {"source": filename},
+                {"filename": filename}
+            ]
+        })
         # 清空全局单例，强制下次重新加载
         global _vectorstore
         _vectorstore = None
@@ -240,32 +243,6 @@ def delete_document_by_filename(filename: str) -> bool:
     except Exception as e:
         print(f"删除文档失败: {e}")
         return False
-
-def delete_temp_file_by_filename(filename: str) -> bool:
-    """
-    从临时向量库中删除指定文件名的所有文档块。
-    返回是否成功。
-    """
-    import streamlit as st
-    temp_vs = st.session_state.get("temp_vectorstore")
-    if temp_vs is None:
-        return False
-
-    collection = temp_vs._collection
-    # 删除 where filename == filename
-    collection.delete(where={"filename": filename})
-
-    # 更新 session_state 中的文件名列表
-    if "temp_filename" in st.session_state:
-        filenames = [f.strip() for f in st.session_state.temp_filename.split(",")]
-        filenames = [f for f in filenames if f != filename]
-        if filenames:
-            st.session_state.temp_filename = ", ".join(filenames)
-        else:
-            # 如果删除后没有文件了，清除临时向量库和文件名
-            del st.session_state.temp_vectorstore
-            del st.session_state.temp_filename
-    return True
 
 def add_documents_to_store(docs: List[Document]) -> bool:
     try:
@@ -277,18 +254,3 @@ def add_documents_to_store(docs: List[Document]) -> bool:
     except Exception as e:
         print(f"添加文档失败: {e}")
         return False
-
-# ---------- 临时向量库 ----------
-def create_temp_vectorstore(chunks: List[Document]):
-    # 增加空列表检查，避免Chroma报错
-    if not chunks:
-        raise ValueError("无法创建空的临时向量库，请检查文档内容。")
-    embeddings = get_embeddings()
-    collection_name = f"temp_{uuid.uuid4().hex[:8]}"
-    vectorstore = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        persist_directory=None,
-        collection_name=collection_name
-    )
-    return vectorstore
