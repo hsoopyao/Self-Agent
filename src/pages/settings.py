@@ -9,25 +9,14 @@ st.title("⚙️ 设置")
 # ---- 表单 ----
 with st.form("settings_form"):
     st.markdown("### 📊 向量检索阈值")
-    col1, col2 = st.columns(2)
-    with col1:
-        score_threshold = st.number_input(
-            "全局 RAG 检索阈值",
-            min_value=0.0,
-            max_value=1.0,
-            value=st.session_state.config_score_threshold,
-            step=0.05,
-            help="内部知识库检索时，相似度高于此值才视为匹配"
-        )
-    with col2:
-        temp_threshold = st.number_input(
-            "临时文件检索阈值",
-            min_value=0.0,
-            max_value=1.0,
-            value=st.session_state.config_temp_score_threshold,
-            step=0.05,
-            help="会话临时文件检索时，相似度高于此值才视为匹配"
-        )
+    score_threshold = st.number_input(
+        "全局 RAG 检索阈值",
+        min_value=0.0,
+        max_value=1.0,
+        value=st.session_state.config_score_threshold,
+        step=0.05,
+        help="内部知识库检索时，相似度高于此值才视为匹配"
+    )
 
     st.markdown("### 🧠 Token 上下文管理")
     col1, col2 = st.columns(2)
@@ -63,7 +52,7 @@ with st.form("settings_form"):
         max_value=20,
         value=int(st.session_state.config_react_max_steps),
         step=1,
-        help="单个问题最多执行的模型决策次数。猫眼排片等多步查询建议设置为 10。"
+        help="单个问题最多执行的模型决策次数。"
     )
 
     st.markdown("### 💻 模型选择")
@@ -77,7 +66,6 @@ with st.form("settings_form"):
     submitted = st.form_submit_button("💾 保存设置")
     if submitted:
         st.session_state.config_score_threshold = score_threshold
-        st.session_state.config_temp_score_threshold = temp_threshold
         st.session_state.config_max_tokens = max_tokens
         st.session_state.config_target_ratio = target_ratio
         st.session_state.config_complex_keywords = complex_keywords

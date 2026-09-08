@@ -10,10 +10,10 @@ INTRODUCE = "您好！我可以回答内部知识，也能进行常识问答和�
 DEFAULT_CONFIG = {
     "config_score_threshold": 0.5,
     "config_temp_score_threshold": 0.3,
-    "config_max_tokens": 6000,
+    "config_max_tokens": 20000,
     "config_target_ratio": 0.6,
     "config_react_max_steps": 10,
-    "config_complex_keywords": "对比,比较,比对,区别",
+    "config_complex_keywords": "对比,比较,比对,区别,分析,总结",
     "config_model_name": os.getenv("MODEL_NAME", "glm-4.7-flash"),
     "github_page": "https://github.com/hsoopyao/Self-Agent",
 }

@@ -3,8 +3,13 @@ from src.core.llm_client import get_llm
 from src.core.config import load_prompt
 
 # 加载 Prompt
-RAG_SYSTEM = load_prompt("rag_system.txt")
-RAG_USER_TEMPLATE = load_prompt("rag_user.txt")
+RAG_SYSTEM = load_prompt("general_prompt.md")
+RAG_USER_TEMPLATE = """
+参考资料：
+{context}
+
+用户问题：{question}
+"""
 
 def rag_chain_stream(input_dict: dict):
     """

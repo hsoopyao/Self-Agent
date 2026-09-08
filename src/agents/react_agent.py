@@ -230,15 +230,12 @@ def extract_relevant_snippets(text: str, query: str, max_sentences: int = 4) -> 
     return "。".join(top_sentences)
 
 # ---------- ReAct 提示词 ----------
-REACT_SYSTEM = load_prompt("react_system.txt")
+REACT_GENERAL_SYSTEM = load_prompt("react_system.md")
 
 
 def _configured_react_steps() -> int:
-    """读取 ReAct 步数上限，并限制在合理范围内。
-
-    首次查询猫眼排片需要依次获取城市、影院和排片 ID，5 步很容易在
-    已拿到最后一个观察结果后没有机会再生成 final_answer。允许通过
-    ``REACT_MAX_STEPS`` 调整，但不接受过小或异常值。
+    """
+    读取 ReAct 步数上限，并限制在合理范围内。
     """
     configured = st.session_state.get("config_react_max_steps")
     if configured is None:
@@ -247,18 +244,6 @@ def _configured_react_steps() -> int:
         return max(5, min(int(configured), 20))
     except (TypeError, ValueError):
         return 10
-
-
-def _max_steps_for_query(user_input: str) -> int:
-    """为需要多次 ID 查询的电影问题预留足够的推理步数。"""
-    max_steps = _configured_react_steps()
-    movie_keywords = ("电影", "影院", "电影院", "排片", "场次", "猫眼")
-    if any(keyword in user_input for keyword in movie_keywords):
-        # 城市 ID → 影院/电影 ID → 排片，可能还需要选择目标影院；
-        # 电影查询至少预留一次最终答案调用。
-        return max(max_steps, 10)
-    return max_steps
-
 
 def _is_timeout_error(error: Exception) -> bool:
     """识别 LLM/HTTP 客户端抛出的超时异常。"""
@@ -282,20 +267,9 @@ def _is_empty_json_list(value: str) -> bool:
 
 
 def _build_observation_context(tool_name: str, summary: str, full_content: str) -> str:
-    """为下一次 LLM 决策构造紧凑观察，避免重复携带大段猫眼 JSON。"""
+    """为下一次 LLM 决策构造紧凑观察 JSON。"""
     summary = summary or "无摘要"
     full_content = full_content or ""
-
-    if tool_name == "maoyan_city_id":
-        # 城市 ID 不一定出现在摘要中，必须保留工具返回值。
-        return f"观察结果（摘要）：{summary}\n观察结果：{full_content[:300]}"
-
-    if tool_name.startswith("maoyan_"):
-        # 猫眼摘要已提取影院/电影 ID、场次和价格；仅在失败时附带少量原始错误。
-        context = f"观察结果（摘要）：{summary}"
-        if "失败" in summary or "错误" in summary:
-            context += f"\n工具返回：{full_content[:600]}"
-        return context
 
     truncated_full = full_content[:1000] + "..." if len(full_content) > 1000 else full_content
     return f"观察结果（摘要）：{summary}\n\n观察结果（完整）：{truncated_full}"
@@ -311,7 +285,7 @@ def react_agent(
     每次 yield 一段文本（思考、工具调用、观察、最终答案）。
     """
     llm = get_llm(streaming=True, temperature=0.1)
-    system_prompt = REACT_SYSTEM
+    system_prompt = REACT_GENERAL_SYSTEM
     if not allow_web:
         system_prompt += "\n本次对话未获得联网授权，禁止调用 web_search；仅可使用内部知识库或直接回答。"
     messages = [SystemMessage(content=system_prompt)]
@@ -324,7 +298,7 @@ def react_agent(
     # 当前用户问题
     messages.append(HumanMessage(content=user_input))
 
-    max_steps = _max_steps_for_query(user_input)
+    max_steps = _configured_react_steps()
     step = 0
     executed_actions = set()
     while step < max_steps:
@@ -393,12 +367,6 @@ def react_agent(
                     summary,
                     full_content,
                 )
-                if movie_cinemas_empty:
-                    observation_context += (
-                        "\n该电影在目标城市没有返回上映影院，这是本次查询的终态。"
-                        "请直接输出 final_answer，不要改查全城影院或逐个影院试探。"
-                    )
-                messages.append(HumanMessage(content=observation_context))
             else:
                 yield "[FINAL]抱歉，我无法继续推理，请重试。"
                 return

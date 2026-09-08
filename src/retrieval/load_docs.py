@@ -35,30 +35,3 @@ def load_and_chunk_documents(data_dir: str = "data") -> List[Document]:
     chunks = text_splitter.split_documents(all_docs)
     logger.info(f"共生成 {len(chunks)} 个文本块")
     return chunks
-
-def chunk_pdf_from_bytes(file_bytes: bytes, filename: str) -> Tuple[List[Document], str]:
-    """
-    从PDF字节流加载并切分，返回 Document 列表和源文件名。
-    """
-    import tempfile
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        tmp.write(file_bytes)
-        tmp_path = tmp.name
-    try:
-        loader = PyPDFLoader(tmp_path)
-        docs = loader.load()
-    finally:
-        os.unlink(tmp_path)  # 删除临时文件
-
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50,
-        separators=["\n\n", "\n", "。", "！", "？", "，", " ", ""],
-    )
-    chunks = text_splitter.split_documents(docs)
-
-    # 为每个块添加元数据：文件名
-    for chunk in chunks:
-        chunk.metadata["filename"] = filename
-        # 保留原有source等信息，但添加自定义字段
-    return chunks
