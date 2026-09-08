@@ -64,7 +64,7 @@ def setup_logging():
     # 但两种方式选一种即可，这里使用大小轮转
 
     # 降低第三方库的日志噪音
-    for lib in ["urllib3", "httpx", "httpx2", "httpcore", "httpcore2", "openai", "tavily"]:
+    for lib in ["urllib3", "httpx", "httpx2", "httpcore", "httpcore2", "openai", "tavily", "pdfminer"]:
         logging.getLogger(lib).setLevel(logging.WARNING)
 
     return root_logger
