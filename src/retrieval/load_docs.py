@@ -1,11 +1,12 @@
-# load_docs.py
 import logging
 import os
 from typing import List
-from langchain_pdfmuse import PdfmuseLoader
+
 from langchain_core.documents import Document
+from langchain_pdfmuse import PdfmuseLoader
 
 logger = logging.getLogger(__name__)
+
 
 def load_and_chunk_documents(data_dir: str = "data") -> List[Document]:
     """

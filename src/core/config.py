@@ -1,5 +1,5 @@
-# src/config.py
 import os
+
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -17,14 +17,17 @@ DEFAULT_CONFIG = {
     "github_page": "https://github.com/hsoopyao/Self-Agent",
 }
 
+
 def init_config():
     """初始化 session_state 中的配置，如果未设置则使用默认值。"""
     for key, default_val in DEFAULT_CONFIG.items():
         if key not in st.session_state:
             st.session_state[key] = default_val
 
+
 # 确定项目根目录,读取 prompt 文件
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 def load_prompt(filename):
     path = os.path.join(PROJECT_ROOT, "prompts", filename)

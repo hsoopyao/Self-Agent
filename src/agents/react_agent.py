@@ -1,19 +1,22 @@
 import json
+import logging
 import os
 import re
-import streamlit as st
-import logging, traceback
+import traceback
 from typing import Generator, List, Dict, Tuple
+
+import streamlit as st
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
-from src.retrieval.vectorstore import search_with_score, get_documents_by_heading_path
 from src.chat.direct_chat import direct_chat_sync
-from src.core.llm_client import get_llm
-from src.core.config import load_prompt
 from src.chat.general_chat import search_results
+from src.core.config import load_prompt
+from src.core.llm_client import get_llm
+from src.retrieval.vectorstore import search_with_score, get_documents_by_heading_path
 from src.ui.ui_components import clean_markdown
 
 logger = logging.getLogger(__name__)
+
 
 # ---------- 辅助函数：提取摘要 ----------
 def _summarize_text(text: str, max_sentences: int = 2) -> str:
@@ -27,6 +30,7 @@ def _summarize_text(text: str, max_sentences: int = 2) -> str:
     if len(sentences) > max_sentences:
         summary += "……"
     return summary
+
 
 # ---------- 工具函数 ----------
 def execute_rag(query: str) -> Tuple[str, str, str]:
@@ -98,9 +102,11 @@ def execute_web(query: str) -> Tuple[str, str, str]:
         # 用户友好提示
         return "⚠️ 处理请求时出现内部错误，请稍后重试。", "", ""
 
+
 def execute_chat(query: str) -> str:
     """直接对话，不依赖外部信息（返回完整回答）"""
     return direct_chat_sync(query)
+
 
 def call_tool(tool_name: str, query: str, allow_web: bool = True) -> Tuple[str, str, str]:
     """
@@ -119,6 +125,7 @@ def call_tool(tool_name: str, query: str, allow_web: bool = True) -> Tuple[str, 
         return answer, "", ""
     else:
         return f"未知工具: {tool_name}", "", ""
+
 
 # ---------- 解析 LLM 响应的辅助函数 ----------
 def extract_json(content: str):
@@ -163,7 +170,7 @@ def extract_json(content: str):
                 elif ch == '}':
                     brace_count -= 1
                     if brace_count == 0:
-                        json_str = content[start:i+1]
+                        json_str = content[start:i + 1]
                         try:
                             return json.loads(json_str)
                         except:
@@ -214,6 +221,7 @@ def extract_json(content: str):
 
     return None
 
+
 # ---------- 提取与查询相关的片段 ----------
 def extract_relevant_snippets(text: str, query: str, max_sentences: int = 4) -> str:
     """
@@ -249,6 +257,7 @@ def extract_relevant_snippets(text: str, query: str, max_sentences: int = 4) -> 
 
     return "。".join(top_sentences)
 
+
 # ---------- ReAct 提示词 ----------
 REACT_GENERAL_SYSTEM = load_prompt("react_system.md")
 
@@ -265,15 +274,16 @@ def _configured_react_steps() -> int:
     except (TypeError, ValueError):
         return 10
 
+
 def _is_timeout_error(error: Exception) -> bool:
     """识别 LLM/HTTP 客户端抛出的超时异常。"""
     error_text = str(error).lower()
     error_type = type(error).__name__.lower()
     return (
-        isinstance(error, TimeoutError)
-        or "timeout" in error_type
-        or "timed out" in error_text
-        or "request timed out" in error_text
+            isinstance(error, TimeoutError)
+            or "timeout" in error_type
+            or "timed out" in error_text
+            or "request timed out" in error_text
     )
 
 
@@ -294,11 +304,12 @@ def _build_observation_context(tool_name: str, summary: str, full_content: str) 
     truncated_full = full_content[:1000] + "..." if len(full_content) > 1000 else full_content
     return f"观察结果（摘要）：{summary}\n\n观察结果（完整）：{truncated_full}"
 
+
 # ---------- ReAct 主循环 ----------
 def react_agent(
-    user_input: str,
-    history: List[Dict[str, str]],
-    allow_web: bool = True,
+        user_input: str,
+        history: List[Dict[str, str]],
+        allow_web: bool = True,
 ) -> Generator[str, None, None]:
     """
     ReAct 循环，生成最终回答（流式输出）。
@@ -346,7 +357,8 @@ def react_agent(
                 if action_signature in executed_actions:
                     yield "[OBSERVATION]📊 已跳过相同工具和参数的重复调用，请基于已有结果回答。"
                     messages.append(AIMessage(content=content))
-                    messages.append(HumanMessage(content="该工具和参数已经执行过。不要重复调用，请基于已有观察结果输出 final_answer。"))
+                    messages.append(HumanMessage(
+                        content="该工具和参数已经执行过。不要重复调用，请基于已有观察结果输出 final_answer。"))
                     continue
 
                 executed_actions.add(action_signature)

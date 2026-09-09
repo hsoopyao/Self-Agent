@@ -3,26 +3,27 @@ import logging
 
 import streamlit as st
 
-from src.core.context_manager import count_tokens, trim_history
-from src.core.config import INTRODUCE
+from src.agents.react_agent import react_agent
+from src.agents.router import route_query
 from src.chat.direct_chat import direct_chat_stream
 from src.chat.general_chat import general_chat_stream
+from src.core.config import INTRODUCE
+from src.core.context_manager import count_tokens, trim_history
 from src.retrieval.rag_chain import rag_chain_with_docs
-from src.agents.router import route_query
-from src.agents.react_agent import react_agent
+from src.retrieval.vectorstore import ensure_vectorstore_loaded, get_documents_by_heading_path
+from src.retrieval.vectorstore import (
+    list_documents,
+    search_with_score,
+)
 from src.ui.sidebar import update_token_display
 from src.ui.ui_components import (
     render_action,
     render_observation,
     render_thought,
 )
-from src.retrieval.vectorstore import ensure_vectorstore_loaded, get_documents_by_heading_path
-from src.retrieval.vectorstore import (
-    list_documents,
-    search_with_score,
-)
 
 logger = logging.getLogger(__name__)
+
 
 def chat_page():
     st.title("智能助手")
@@ -36,7 +37,6 @@ def chat_page():
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-
 
     if user_input := st.chat_input("请输入您的问题..."):
         # 先保存进入本轮前的历史，再单独追加当前问题。
@@ -57,7 +57,8 @@ def chat_page():
                 # 显示压缩等待提示（使用 spinner）
                 with st.spinner("⏳ 上下文接近上限，正在压缩历史摘要，请稍候..."):
                     # 压缩历史（只压缩历史部分，当前用户消息保留）
-                    compressed_history = trim_history(history, max_tokens=threshold, target_ratio=st.session_state.config_target_ratio)
+                    compressed_history = trim_history(history, max_tokens=threshold,
+                                                      target_ratio=st.session_state.config_target_ratio)
                     # 重建消息列表：压缩后的历史 + 当前用户消息
                     st.session_state.messages = compressed_history + [current_user_message]
                     # 更新 history 为压缩后的历史（供后续生成使用）
@@ -69,6 +70,7 @@ def chat_page():
 
             try:
                 stream_gen = None
+
                 # 将当前问题与最近的对话历史结合，生成一个更完整的查询词
                 def enrich_query_with_history(query: str, history: list) -> str:
                     """
@@ -118,7 +120,8 @@ def chat_page():
                                     if allow_web:
                                         stream_gen = general_chat_stream(user_input, history=history)
                                     else:
-                                        stream_gen = iter(["📭 内部知识库为空，请先在侧边栏上传相关 PDF 文档，然后再次提问。"])
+                                        stream_gen = iter(
+                                            ["📭 内部知识库为空，请先在侧边栏上传相关 PDF 文档，然后再次提问。"])
                                 else:
                                     # 在 RAG 分支中，调用检索前
                                     enriched_query = enrich_query_with_history(user_input, history)

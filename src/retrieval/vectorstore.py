@@ -1,9 +1,9 @@
+import logging
 import os
 import tempfile
-import logging
 from typing import List, Dict
-import streamlit as st
 
+import streamlit as st
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -25,6 +25,7 @@ _vectorstore = None
 _embeddings = None
 _initialized = False
 
+
 # 获取 embedding 模型单例
 def get_embeddings():
     global _embeddings
@@ -36,6 +37,7 @@ def get_embeddings():
         )
     return _embeddings
 
+
 # 全局单例：获取向量库实例（仅初始化一次）
 def get_vectorstore():
     global _vectorstore, _initialized
@@ -46,6 +48,7 @@ def get_vectorstore():
         else:
             _vectorstore = create_vectorstore(auto_load=False)
     return _vectorstore
+
 
 # ---------- 格式化文档函数 ----------
 def _clean_metadata_for_chroma(doc: Document) -> Document:
@@ -76,6 +79,7 @@ def _clean_metadata_for_chroma(doc: Document) -> Document:
         cleaned_meta["heading_path_str"] = " > ".join(heading_path)
     return Document(page_content=doc.page_content, metadata=cleaned_meta)
 
+
 def _flatten_docs(docs):
     """递归展平嵌套列表，并将所有元素转换为 Document（如果还不是）"""
     flat = []
@@ -88,6 +92,7 @@ def _flatten_docs(docs):
             flat.append(_to_document(item))
     return flat
 
+
 def _to_document(item):
     """将非 Document 对象转为 Document（兼容旧代码）"""
     if isinstance(item, Document):
@@ -97,6 +102,7 @@ def _to_document(item):
         if isinstance(meta, dict):
             return Document(page_content=content, metadata=meta)
     return Document(page_content=str(item))
+
 
 # ---------- 向量库加载函数 ----------
 def create_vectorstore(auto_load: bool = False):
@@ -129,6 +135,7 @@ def create_vectorstore(auto_load: bool = False):
                     vectorstore.add_documents(cleaned)
         return vectorstore
 
+
 def ensure_vectorstore_loaded() -> bool:
     """
     确保向量库已加载，并显示加载状态（适用于 Streamlit）。
@@ -152,11 +159,13 @@ def ensure_vectorstore_loaded() -> bool:
         st.error(f"❌ 向量库加载失败：{e}")
         return False
 
+
 # ---------- 检索函数 ----------
 def get_retriever(vectorstore=None, k: int = 2):
     if vectorstore is None:
         vectorstore = get_vectorstore()
     return vectorstore.as_retriever(search_kwargs={"k": k})
+
 
 def search_with_score(query: str, k: int = 2, score_threshold: float = 0.5):
     vectorstore = get_vectorstore()
@@ -168,6 +177,7 @@ def search_with_score(query: str, k: int = 2, score_threshold: float = 0.5):
         return False, [], top_score
     docs = [doc for doc, _ in docs_and_scores]
     return True, docs, top_score
+
 
 def get_documents_by_heading_path(heading_path: List[str], include_subchapters: bool = True) -> List[Document]:
     """
@@ -190,6 +200,7 @@ def get_documents_by_heading_path(heading_path: List[str], include_subchapters: 
     matched.sort(key=lambda d: d.metadata.get("page", 0))
     return matched
 
+
 # ---------- 知识库导入函数 ----------
 def chunk_pdf_from_bytes(file_bytes: bytes, filename: str, category: str = "未分类") -> List[Document]:
     """
@@ -211,6 +222,7 @@ def chunk_pdf_from_bytes(file_bytes: bytes, filename: str, category: str = "未�
     finally:
         os.unlink(tmp_path)
 
+
 def add_documents_to_store(docs: List[Document]) -> bool:
     """
     将文档列表添加到向量库，自动清理不支持的元数据类型。
@@ -229,6 +241,7 @@ def add_documents_to_store(docs: List[Document]) -> bool:
     except Exception as e:
         logger.error(f"添加文档失败: {e}")
         return False
+
 
 # ---------- 知识库文档分类函数 ----------
 def get_collection():

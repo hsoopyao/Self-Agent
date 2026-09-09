@@ -1,6 +1,6 @@
-from src.retrieval.vectorstore import get_retriever
-from src.core.llm_client import get_llm
 from src.core.config import load_prompt
+from src.core.llm_client import get_llm
+from src.retrieval.vectorstore import get_retriever
 
 # 加载 Prompt
 RAG_SYSTEM = load_prompt("general_prompt.md")
@@ -10,6 +10,7 @@ RAG_USER_TEMPLATE = """
 
 用户问题：{question}
 """
+
 
 def rag_chain_stream(input_dict: dict):
     """
@@ -27,6 +28,7 @@ def rag_chain_stream(input_dict: dict):
     ]
     for chunk in llm.stream(messages):
         yield chunk.content
+
 
 def rag_chain_with_docs(docs, question: str):
     """
