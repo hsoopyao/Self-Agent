@@ -16,7 +16,7 @@ from src.ui.ui_components import (
     render_observation,
     render_thought,
 )
-from src.retrieval.vectorstore import ensure_vectorstore_loaded
+from src.retrieval.vectorstore import ensure_vectorstore_loaded, get_documents_by_heading_path
 from src.retrieval.vectorstore import (
     list_documents,
     search_with_score,
@@ -69,16 +69,6 @@ def chat_page():
 
             try:
                 stream_gen = None
-                # 临时库检索
-                temp_vs = st.session_state.get("temp_vectorstore")
-                if temp_vs is not None:
-                    st.caption("📄 基于临时文件回答")
-                    docs_and_scores = temp_vs.similarity_search_with_relevance_scores(user_input, k=4)
-                    if docs_and_scores and docs_and_scores[0][1] >= st.session_state.config_temp_score_threshold:
-                        docs = [doc for doc, _ in docs_and_scores]
-                        stream_gen = rag_chain_with_docs(docs, user_input)
-                    else:
-                        st.caption("💡 临时文件中未找到相关信息，转为全局检索。")
                 # 将当前问题与最近的对话历史结合，生成一个更完整的查询词
                 def enrich_query_with_history(query: str, history: list) -> str:
                     """
@@ -134,12 +124,23 @@ def chat_page():
                                     enriched_query = enrich_query_with_history(user_input, history)
                                     has_match, docs, score = search_with_score(
                                         enriched_query,
-                                        k=4,
+                                        k=3,
                                         score_threshold=st.session_state.config_score_threshold,
                                     )
                                     logger.debug(f'{has_match}, docs: {len(docs)}, score: {score}')
                                     if has_match:
-                                        stream_gen = rag_chain_with_docs(docs, user_input)
+                                        # 获取最相关块的 heading_path，并拉取整章
+                                        first_doc = docs[0]
+                                        heading_path = first_doc.metadata.get("heading_path")
+                                        if heading_path:
+                                            full_chapter_docs = get_documents_by_heading_path(heading_path,
+                                                                                              include_subchapters=True)
+                                            if full_chapter_docs:
+                                                stream_gen = rag_chain_with_docs(full_chapter_docs, user_input)
+                                            else:
+                                                stream_gen = rag_chain_with_docs(docs, user_input)  # 回退
+                                        else:
+                                            stream_gen = rag_chain_with_docs(docs, user_input)
                                     else:
                                         if allow_web:
                                             logger.debug("no match but allow web...")

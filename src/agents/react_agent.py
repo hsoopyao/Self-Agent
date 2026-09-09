@@ -6,7 +6,7 @@ import logging, traceback
 from typing import Generator, List, Dict, Tuple
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
-from src.retrieval.vectorstore import search_with_score
+from src.retrieval.vectorstore import search_with_score, get_documents_by_heading_path
 from src.chat.direct_chat import direct_chat_sync
 from src.core.llm_client import get_llm
 from src.core.config import load_prompt
@@ -31,16 +31,36 @@ def _summarize_text(text: str, max_sentences: int = 2) -> str:
 # ---------- 工具函数 ----------
 def execute_rag(query: str) -> Tuple[str, str, str]:
     """执行内部知识检索，返回 (摘要, 出处, 完整内容)"""
-    has_match, docs, score = search_with_score(query, k=4, score_threshold=0.0)
+    # 1. 用 k=2（或3）检索最相关块，只为了取 heading_path
+    has_match, docs, score = search_with_score(query, k=2, score_threshold=0.0)
     if not has_match or not docs:
         return "未找到相关信息", "", ""
 
     first_doc = docs[0]
-    full_text = first_doc.page_content
-    # 提取与查询相关的片段作为摘要
-    summary = extract_relevant_snippets(full_text, query, max_sentences=3)
-    source = first_doc.metadata.get("filename", "未知文档")
-    full_content = "\n---\n".join([doc.page_content for doc in docs[:3]])
+    heading_path = first_doc.metadata.get("heading_path")
+    if not heading_path:
+        # 无法定位，回退到碎片拼接
+        full_text = first_doc.page_content
+        summary = extract_relevant_snippets(full_text, query, max_sentences=3)
+        source = first_doc.metadata.get("filename", "未知文档")
+        full_content = "\n---\n".join([doc.page_content for doc in docs[:3]])
+        return summary, f"📄 {source}", full_content
+
+    # 2. 获取该章节下所有块
+    chapter_docs = get_documents_by_heading_path(heading_path, include_subchapters=True)
+    if not chapter_docs:
+        # 回退
+        full_text = first_doc.page_content
+        summary = extract_relevant_snippets(full_text, query, max_sentences=3)
+        source = first_doc.metadata.get("filename", "未知文档")
+        full_content = "\n---\n".join([doc.page_content for doc in docs[:3]])
+        return summary, f"📄 {source}", full_content
+
+    # 3. 拼接完整内容（按页码顺序）
+    full_content = "\n\n".join([doc.page_content for doc in chapter_docs])
+    summary = extract_relevant_snippets(full_content, query, max_sentences=3)
+    chapter_path_str = " > ".join(heading_path)
+    source = f"{first_doc.metadata.get('filename', '未知文档')} → {chapter_path_str}"
     return summary, f"📄 {source}", full_content
 
 

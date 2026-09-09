@@ -1,37 +1,35 @@
-"""
-负责加载指定目录下的所有文档（PDF），并将其切分成适合检索的文本块。
-"""
-import os
+# load_docs.py
 import logging
-from typing import List, Tuple
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+import os
+from typing import List
+from langchain_pdfmuse import PdfmuseLoader
 from langchain_core.documents import Document
 
 logger = logging.getLogger(__name__)
 
 def load_and_chunk_documents(data_dir: str = "data") -> List[Document]:
-    all_docs = []
+    """
+    加载 data_dir 下所有 PDF，按元素（标题/段落/表格）解析，
+    每个元素作为一个独立的 Document，不做二次切分。
+    """
+    all_elements = []
+
     for file in os.listdir(data_dir):
         if file.lower().endswith(".pdf"):
             file_path = os.path.join(data_dir, file)
             logger.info(f"正在加载：{file_path}")
-            loader = PyPDFLoader(file_path)
+
+            loader = PdfmuseLoader(file_path, mode="elements")
             docs = loader.load()
-            # 为每页文档添加文件名元数据
+
             for doc in docs:
                 doc.metadata["filename"] = file
-            all_docs.extend(docs)
 
-    if not all_docs:
+            all_elements.extend(docs)
+
+    if not all_elements:
         logger.warning("警告：未找到任何 PDF 文件，请检查 data 目录。")
         return []
 
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=300,
-        chunk_overlap=50,
-        separators=["\n\n", "\n", "。", "！", "？", "，", " ", ""],
-    )
-    chunks = text_splitter.split_documents(all_docs)
-    logger.info(f"共生成 {len(chunks)} 个文本块")
-    return chunks
+    logger.info(f"共生成 {len(all_elements)} 个语义元素块（标题/段落/表格）")
+    return all_elements
