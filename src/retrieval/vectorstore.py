@@ -25,9 +25,8 @@ _vectorstore = None
 _embeddings = None
 _initialized = False
 
-
+# 获取 embedding 模型单例
 def get_embeddings():
-    """获取 embedding 模型单例"""
     global _embeddings
     if _embeddings is None:
         _embeddings = HuggingFaceEmbeddings(
@@ -37,7 +36,18 @@ def get_embeddings():
         )
     return _embeddings
 
+# 全局单例：获取向量库实例（仅初始化一次）
+def get_vectorstore():
+    global _vectorstore, _initialized
+    if _vectorstore is None:
+        if not _initialized:
+            _vectorstore = create_vectorstore()
+            _initialized = True
+        else:
+            _vectorstore = create_vectorstore(auto_load=False)
+    return _vectorstore
 
+# ---------- 格式化文档函数 ----------
 def _clean_metadata_for_chroma(doc: Document) -> Document:
     """
     清理 Document 的 metadata，使其符合 Chroma 的值类型要求：
@@ -66,7 +76,6 @@ def _clean_metadata_for_chroma(doc: Document) -> Document:
         cleaned_meta["heading_path_str"] = " > ".join(heading_path)
     return Document(page_content=doc.page_content, metadata=cleaned_meta)
 
-
 def _flatten_docs(docs):
     """递归展平嵌套列表，并将所有元素转换为 Document（如果还不是）"""
     flat = []
@@ -79,7 +88,6 @@ def _flatten_docs(docs):
             flat.append(_to_document(item))
     return flat
 
-
 def _to_document(item):
     """将非 Document 对象转为 Document（兼容旧代码）"""
     if isinstance(item, Document):
@@ -90,7 +98,7 @@ def _to_document(item):
             return Document(page_content=content, metadata=meta)
     return Document(page_content=str(item))
 
-
+# ---------- 向量库加载函数 ----------
 def create_vectorstore(auto_load: bool = False):
     embeddings = get_embeddings()
     try:
@@ -121,39 +129,6 @@ def create_vectorstore(auto_load: bool = False):
                     vectorstore.add_documents(cleaned)
         return vectorstore
 
-
-def add_documents_to_store(docs: List[Document]) -> bool:
-    """
-    将文档列表添加到向量库，自动清理不支持的元数据类型。
-    """
-    try:
-        flat = _flatten_docs(docs)
-        if not flat:
-            logger.warning("传入的文档列表为空或没有 Document 对象")
-            return False
-        cleaned = [_clean_metadata_for_chroma(doc) for doc in flat]
-        vectorstore = get_vectorstore()
-        vectorstore.add_documents(cleaned)
-        global _vectorstore
-        _vectorstore = None
-        return True
-    except Exception as e:
-        logger.error(f"添加文档失败: {e}")
-        return False
-
-
-def get_vectorstore():
-    """全局单例：获取向量库实例（仅初始化一次）"""
-    global _vectorstore, _initialized
-    if _vectorstore is None:
-        if not _initialized:
-            _vectorstore = create_vectorstore()
-            _initialized = True
-        else:
-            _vectorstore = create_vectorstore(auto_load=False)
-    return _vectorstore
-
-
 def ensure_vectorstore_loaded() -> bool:
     """
     确保向量库已加载，并显示加载状态（适用于 Streamlit）。
@@ -177,13 +152,11 @@ def ensure_vectorstore_loaded() -> bool:
         st.error(f"❌ 向量库加载失败：{e}")
         return False
 
-
 # ---------- 检索函数 ----------
 def get_retriever(vectorstore=None, k: int = 2):
     if vectorstore is None:
         vectorstore = get_vectorstore()
     return vectorstore.as_retriever(search_kwargs={"k": k})
-
 
 def search_with_score(query: str, k: int = 2, score_threshold: float = 0.5):
     vectorstore = get_vectorstore()
@@ -196,6 +169,26 @@ def search_with_score(query: str, k: int = 2, score_threshold: float = 0.5):
     docs = [doc for doc, _ in docs_and_scores]
     return True, docs, top_score
 
+def get_documents_by_heading_path(heading_path: List[str], include_subchapters: bool = True) -> List[Document]:
+    """
+    根据 heading_path 列表，获取该章节下所有文档块（包括子章节），按页码排序。
+    需要 metadata 中含有 'heading_path_str' 字段。
+    """
+    vectorstore = get_vectorstore()
+    # 获取全部数据（若数据量巨大，可考虑分页，但通常几千块内没问题）
+    all_data = vectorstore.get(include=["documents", "metadatas"])
+    target_prefix = " > ".join(heading_path)
+    matched = []
+    for content, meta in zip(all_data['documents'], all_data['metadatas']):
+        path_str = meta.get("heading_path_str", "")
+        if include_subchapters:
+            if path_str == target_prefix or path_str.startswith(target_prefix + " > "):
+                matched.append(Document(page_content=content, metadata=meta))
+        else:
+            if path_str == target_prefix:
+                matched.append(Document(page_content=content, metadata=meta))
+    matched.sort(key=lambda d: d.metadata.get("page", 0))
+    return matched
 
 # ---------- 知识库导入函数 ----------
 def chunk_pdf_from_bytes(file_bytes: bytes, filename: str, category: str = "未分类") -> List[Document]:
@@ -218,7 +211,26 @@ def chunk_pdf_from_bytes(file_bytes: bytes, filename: str, category: str = "未�
     finally:
         os.unlink(tmp_path)
 
+def add_documents_to_store(docs: List[Document]) -> bool:
+    """
+    将文档列表添加到向量库，自动清理不支持的元数据类型。
+    """
+    try:
+        flat = _flatten_docs(docs)
+        if not flat:
+            logger.warning("传入的文档列表为空或没有 Document 对象")
+            return False
+        cleaned = [_clean_metadata_for_chroma(doc) for doc in flat]
+        vectorstore = get_vectorstore()
+        vectorstore.add_documents(cleaned)
+        global _vectorstore
+        _vectorstore = None
+        return True
+    except Exception as e:
+        logger.error(f"添加文档失败: {e}")
+        return False
 
+# ---------- 知识库文档分类函数 ----------
 def get_collection():
     vectorstore = get_vectorstore()
     return vectorstore._collection
@@ -268,24 +280,3 @@ def delete_document_by_filename(filename: str) -> bool:
     except Exception as e:
         logger.error(f"删除文档失败: {e}")
         return False
-
-def get_documents_by_heading_path(heading_path: List[str], include_subchapters: bool = True) -> List[Document]:
-    """
-    根据 heading_path 列表，获取该章节下所有文档块（包括子章节），按页码排序。
-    需要 metadata 中含有 'heading_path_str' 字段。
-    """
-    vectorstore = get_vectorstore()
-    # 获取全部数据（若数据量巨大，可考虑分页，但通常几千块内没问题）
-    all_data = vectorstore.get(include=["documents", "metadatas"])
-    target_prefix = " > ".join(heading_path)
-    matched = []
-    for content, meta in zip(all_data['documents'], all_data['metadatas']):
-        path_str = meta.get("heading_path_str", "")
-        if include_subchapters:
-            if path_str == target_prefix or path_str.startswith(target_prefix + " > "):
-                matched.append(Document(page_content=content, metadata=meta))
-        else:
-            if path_str == target_prefix:
-                matched.append(Document(page_content=content, metadata=meta))
-    matched.sort(key=lambda d: d.metadata.get("page", 0))
-    return matched
