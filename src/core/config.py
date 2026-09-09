@@ -8,8 +8,7 @@ load_dotenv()
 INTRODUCE = "您好！我可以回答内部知识，也能进行常识问答和联网搜索。请问有什么可以帮助您？"
 
 DEFAULT_CONFIG = {
-    "config_score_threshold": 0.5,
-    "config_temp_score_threshold": 0.3,
+    "config_score_threshold": 0.0,
     "config_max_tokens": 20000,
     "config_target_ratio": 0.6,
     "config_react_max_steps": 10,

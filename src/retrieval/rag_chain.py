@@ -16,7 +16,7 @@ def rag_chain_stream(input_dict: dict):
     流式生成器：检索内部文档，流式生成回答。
     """
     llm = get_llm(streaming=True, temperature=0.2)
-    retriever = get_retriever(k=4)
+    retriever = get_retriever(k=3)
 
     question = input_dict["input"]
     docs = retriever.invoke(question)
