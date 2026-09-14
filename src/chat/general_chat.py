@@ -12,7 +12,7 @@ from tavily.errors import TimeoutError as TavilyTimeoutError
 from src.core.llm_client import get_llm
 from src.core.config import load_prompt
 
-GENERAL_SYSTEM = load_prompt("general_system.txt")
+GENERAL_SYSTEM = load_prompt("general_prompt.md")
 GENERAL_USER_TEMPLATE = """
 问题：{question}
 搜索到的信息：{search_info}

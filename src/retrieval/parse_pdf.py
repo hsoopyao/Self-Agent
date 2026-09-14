@@ -1,0 +1,330 @@
+import os
+import re
+import logging
+import tempfile
+from typing import List, Tuple
+
+import pymupdf4llm
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+import pymupdf
+from collections import Counter
+
+logger = logging.getLogger(__name__)
+
+# ---------- 分块配置 ----------
+CHUNK_SIZE = 800
+CHUNK_OVERLAP = 150
+MIN_CHUNK_LEN = 20          # 过短的 chunk 丢弃（通常是空标题）
+MAX_SECTION_LEN = 8000      # 单个 section 超过这个长度才二次切分
+
+# Markdown 标题正则：匹配行首的 # ## ### ...
+_HEADER_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+
+
+def _split_by_headers(full_text: str) -> List[Tuple[int, int, List[str], str]]:
+    """
+    按 Markdown 标题切分全文，返回 [(start, end, heading_path, content), ...]
+    heading_path 是从根到当前标题的路径，如 ['第三章', '3.2 登录模块']
+    """
+    matches = list(_HEADER_RE.finditer(full_text))
+    sections = []
+
+    if not matches:
+        return [(0, len(full_text), [], full_text)]
+
+    # 第一个标题之前的内容，归到"无标题"区
+    if matches[0].start() > 0:
+        sections.append((0, matches[0].start(), [], full_text[: matches[0].start()]))
+
+    stack: List[Tuple[int, str]] = []   # [(level, title), ...]
+    for i, m in enumerate(matches):
+        level = len(m.group(1))
+        title = m.group(2).strip()
+
+        # 弹出层级 >= 当前的，保持栈是严格的父子链
+        while stack and stack[-1][0] >= level:
+            stack.pop()
+        stack.append((level, title))
+        heading_path = [t for _, t in stack]
+
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(full_text)
+        sections.append((start, end, heading_path, full_text[start:end]))
+
+    return sections
+
+
+def _find_page(char_pos: int, page_offsets: List[Tuple[int, int, int]]):
+    """根据字符位置反查页码"""
+    for start, end, page_num in page_offsets:
+        if start <= char_pos < end:
+            return page_num
+    return page_offsets[-1][2] if page_offsets else None
+
+def split_keep_tables(text: str):
+    """把 text 拆成 [(type, content), ...]，表格整体不切"""
+    lines = text.split("\n")
+    blocks = []
+    buf = []
+    in_table = False
+    for line in lines:
+        is_table_line = line.strip().startswith("|") and line.strip().endswith("|")
+        if is_table_line and not in_table:
+            # 表格开始，先冲刷之前的缓冲
+            if buf:
+                blocks.append(("text", "\n".join(buf)))
+                buf = []
+            in_table = True
+        elif not is_table_line and in_table:
+            # 表格结束
+            blocks.append(("table", "\n".join(buf)))
+            buf = []
+            in_table = False
+        buf.append(line)
+    if buf:
+        blocks.append(("table" if in_table else "text", "\n".join(buf)))
+    return blocks
+
+
+def detect_body_start_page(pages, min_chars=200):
+    """
+    找到第一页正文，返回其索引（0-based）。
+    跳过封面 / 修订历史 / 批准 / 目录页。
+    """
+    for i, p in enumerate(pages):
+        lines = [l.strip() for l in p["text"].split("\n") if l.strip()]
+        if not lines:
+            continue
+
+        table_lines = sum(1 for l in lines if l.startswith("|"))
+        table_ratio = table_lines / len(lines)
+        dot_lines = sum(1 for l in lines if l.count(".") >= 5)
+        # 排除表格行后剩余的文字量
+        char_count = sum(len(l) for l in lines if not l.startswith("|"))
+
+        # 表格为主的页 → 封面 / Revision History / Approvals
+        if table_ratio > 0.3:
+            continue
+        # 大量省略号 → 目录
+        if dot_lines >= 3:
+            continue
+        # 非表格文字太少 → 封面
+        if char_count < min_chars:
+            continue
+
+        return i
+
+    return 0
+
+def parse_pdf_to_chunks(pdf_path, filename, chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP):
+    # 自适应检测页眉页脚 y 边界
+    top_y, bottom_y = detect_edge_y_bounds(pdf_path)
+    logger.info(f"{filename}：页眉底={top_y}，页脚顶={bottom_y}")
+
+    tmp_cropped = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
+    _crop_by_y(pdf_path, tmp_cropped, top_y, bottom_y)
+
+    try:
+        pages = pymupdf4llm.to_markdown(tmp_cropped, page_chunks=True)
+    finally:
+        os.unlink(tmp_cropped)
+
+    if not pages:
+        return []
+
+    body_start = detect_body_start_page(pages)
+    if body_start > 0:
+        logger.info(f"{filename}：跳过前 {body_start} 页（封面/目录/说明）")
+        pages = pages[body_start:]
+
+    # 拼接 + 页偏移
+    full_text = ""
+    page_offsets = []
+    for idx, p in enumerate(pages):
+        start = len(full_text)
+        full_text += p["text"].rstrip() + "\n\n"
+        end = len(full_text)
+        meta = p.get("metadata", {}) or {}
+        page_num = meta.get("page") or meta.get("page_number") or (idx + 1)
+        page_offsets.append((start, end, int(page_num)))
+
+    sections = _split_by_headers(full_text)
+
+    # 剔除文档级标题
+    doc_title = None
+    if sections:
+        first_page = _find_page(sections[0][0], page_offsets)
+        for s, e, hp, _ in sections:
+            if hp and len(hp) == 1 and _find_page(s, page_offsets) == first_page:
+                doc_title = hp[0]
+                break
+
+    def strip_doc_title(hp):
+        return hp[1:] if doc_title and hp and hp[0] == doc_title else hp
+
+    def is_noise(hp, content):
+        # 只看当前章节自己的标题，避免父级 Contents 污染
+        last = hp[-1].lower() if hp else ""
+        if "contents" in last or "目录" in last or "目錄" in last:
+            return True
+        # 内容里大量省略号 → 目录页残留
+        if content.count("....") >= 3:
+            return True
+        # 表格内容豁免
+        stripped = content.strip()
+        if stripped.startswith("|"):
+            return False
+        if len(stripped) < MIN_CHUNK_LEN:
+            return True
+        return False
+
+    sections = [
+        (s, e, strip_doc_title(hp), t)
+        for s, e, hp, t in sections
+        if not is_noise(strip_doc_title(hp), t)
+    ]
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=["\n\n", "\n", "。", "；", "，", " ", ""],
+        keep_separator=True,
+    )
+
+    chunks = []
+    cursor = 0
+    for sec_start, sec_end, heading_path, sec_text in sections:
+        if len(sec_text.strip()) < MIN_CHUNK_LEN:
+            continue
+
+        # 表格整体保留，非表格按大小切
+        for block_type, block in split_keep_tables(sec_text):
+            block = block.strip()
+            if len(block) < MIN_CHUNK_LEN:
+                continue
+            if block_type == "table" or len(block) <= chunk_size:
+                pieces = [block]
+            else:
+                pieces = text_splitter.split_text(block)
+
+            for sub in pieces:
+                sub = sub.strip()
+                if len(sub) < MIN_CHUNK_LEN:
+                    continue
+
+                # 表格块：加语境前缀，帮助向量检索命中
+                if sub.startswith("|"):
+                    prefix_parts = []
+                    if heading_path:
+                        prefix_parts.append("章节：" + " > ".join(heading_path))
+                    prefix_parts.append("内容类型：表格")
+                    sub = f"【{'；'.join(prefix_parts)}】\n{sub}"
+
+                pos = full_text.find(sub, cursor)
+                if pos == -1:
+                    pos = sec_start
+                else:
+                    cursor = max(cursor, pos)
+                page_num = _find_page(pos, page_offsets)
+                chunks.append(Document(
+                    page_content=sub,
+                    metadata={
+                        "filename": filename,
+                        "doc_title": doc_title or filename,
+                        "page": page_num,
+                        "heading_path": heading_path,
+                        "heading_path_str": " > ".join(heading_path),
+                        "chunk_index": len(chunks),
+                    },
+                ))
+
+    logger.info(f"{filename}：{len(pages)} 页 → {len(sections)} 章节 → {len(chunks)} chunk")
+    return chunks
+
+
+def parse_pdf_bytes_to_chunks(
+    file_bytes: bytes,
+    filename: str,
+    chunk_size: int = CHUNK_SIZE,
+    chunk_overlap: int = CHUNK_OVERLAP,
+) -> List[Document]:
+    """从字节流解析（供 Streamlit 上传用）"""
+    import tempfile, os
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(file_bytes)
+        tmp_path = tmp.name
+    try:
+        return parse_pdf_to_chunks(tmp_path, filename, chunk_size, chunk_overlap)
+    finally:
+        os.unlink(tmp_path)
+
+import pymupdf
+from collections import Counter
+
+def detect_edge_y_bounds(pdf_path: str, ratio_threshold=0.5, edge_ratio=0.15):
+    """
+    返回 (top_y, bottom_y)，表示页眉底边和页脚顶边的绝对 y 坐标。
+    检测不到返回 (None, None)。
+    """
+    doc = pymupdf.open(pdf_path)
+    n_pages = doc.page_count
+    if n_pages < 3:
+        doc.close()
+        return None, None
+
+    line_page_count = Counter()
+    line_y_ranges = {}   # line -> (min_y0, max_y1)
+
+    for page in doc:
+        h = page.rect.height
+        seen = set()
+        for block in page.get_text("blocks"):
+            _, y0, _, y1, text = block[:5]
+            in_top = y1 < h * edge_ratio
+            in_bottom = y0 > h * (1 - edge_ratio)
+            if not (in_top or in_bottom):
+                continue
+            for line in text.split("\n"):
+                line = line.strip()
+                if not line or line in seen:
+                    continue
+                seen.add(line)
+                line_page_count[line] += 1
+                if line in line_y_ranges:
+                    ly0, ly1 = line_y_ranges[line]
+                    line_y_ranges[line] = (min(ly0, y0), max(ly1, y1))
+                else:
+                    line_y_ranges[line] = (y0, y1)
+
+    doc.close()
+
+    threshold = max(2, int(n_pages * ratio_threshold))
+    repeated = [l for l, c in line_page_count.items() if c >= threshold]
+    if not repeated:
+        return None, None
+
+    # 取页面高度的一半作为顶/底分界
+    doc = pymupdf.open(pdf_path)
+    mid = doc[0].rect.height / 2
+    doc.close()
+
+    top_y1s = [line_y_ranges[l][1] for l in repeated if line_y_ranges[l][1] < mid]
+    bottom_y0s = [line_y_ranges[l][0] for l in repeated if line_y_ranges[l][0] > mid]
+
+    top_y = max(top_y1s) if top_y1s else None
+    bottom_y = min(bottom_y0s) if bottom_y0s else None
+    return top_y, bottom_y
+
+def _crop_by_y(pdf_path: str, output_path: str, top_y=None, bottom_y=None, margin=2):
+    doc = pymupdf.open(pdf_path)
+    for page in doc:
+        r = page.rect
+        y0 = (top_y + margin) if top_y is not None else r.y0
+        y1 = (bottom_y - margin) if bottom_y is not None else r.y1
+        if y1 <= y0:
+            continue
+        page.set_cropbox(pymupdf.Rect(r.x0, y0, r.x1, y1))
+    doc.save(output_path)
+    doc.close()

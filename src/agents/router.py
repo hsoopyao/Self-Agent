@@ -27,7 +27,7 @@ def direct_chat(query: str) -> str:
 tools = [rag_search, web_search, direct_chat]
 
 # 路由提示词 加载 Prompt
-ROUTER_SYSTEM = load_prompt("router_system.txt")
+ROUTER_SYSTEM = load_prompt("router_prompt.md")
 
 def is_rag_query(question: str) -> bool:
     q_lower = question.lower()
@@ -72,14 +72,14 @@ def route_query(question: str) -> str:
     if any(kw in q_lower for kw in weather_keywords):
         return "web"
 
+    # 闲聊/问候（可简单判断，或直接走 chat 兜底）
+    chat_keywords = ["你好", "介绍", "你是谁", "我是谁", "功能", "能力", "我的名字", "你的名字"]
+    if any(kw in q_lower for kw in chat_keywords):
+        return "chat"
+
     # 内部知识库（文档、政策等）
     if is_rag_query:
         return "rag"
-
-    # 闲聊/问候（可简单判断，或直接走 chat 兜底）
-    chat_keywords = ["你好", "介绍", "你是谁", "功能", "能力"]
-    if any(kw in q_lower for kw in chat_keywords):
-        return "chat"
 
     # ---------- 未命中规则，调用 LLM 路由 ----------
     # 原有逻辑保持不变

@@ -33,35 +33,50 @@ def _summarize_text(text: str, max_sentences: int = 2) -> str:
 
 
 # ---------- 工具函数 ----------
+def _is_table_chunk(text: str) -> bool:
+    """判断 chunk 是否为表格（前 200 字里出现 | 行）"""
+    head = text[:300]
+    return head.strip().startswith("|") or head.count("|") >= 5
+
 def execute_rag(query: str) -> Tuple[str, str, str]:
-    """执行内部知识检索，返回 (摘要, 出处, 完整内容)"""
-    # 1. 用 k=2（或3）检索最相关块，只为了取 heading_path
-    has_match, docs, score = search_with_score(query, k=2, score_threshold=0.0)
+    has_match, docs, score = search_with_score(query, k=3, score_threshold=0.0)
     if not has_match or not docs:
-        return "未找到相关信息", "", ""
+        return (
+            f"【未命中】知识库中未找到与「{query}」相关的内容。"
+            f"建议更换关键词重试（如：同义词、繁体/简体、英文缩写展开、表格字段名）。",
+            "", ""
+        )
 
     first_doc = docs[0]
+
+    # 新增：命中表格时，直接返回表格原文，不展开章节
+    if _is_table_chunk(first_doc.page_content):
+        content = first_doc.page_content
+        source = (
+            f"{first_doc.metadata.get('filename', '?')} · "
+            f"{first_doc.metadata.get('heading_path_str', '')} · "
+            f"p.{first_doc.metadata.get('page', '?')}"
+        )
+        # 摘要保留表格前 200 字 + 表格本身
+        summary = content[:300]
+        return summary, f"📄 {source}", content
+
+    # 非表格：原来的逻辑继续
     heading_path = first_doc.metadata.get("heading_path")
     if not heading_path:
-        # 无法定位，回退到碎片拼接
-        full_text = first_doc.page_content
-        summary = extract_relevant_snippets(full_text, query, max_sentences=3)
+        full_content = "\n---\n".join([d.page_content for d in docs[:3]])
+        summary = extract_relevant_snippets(full_content, query, max_sentences=3)
         source = first_doc.metadata.get("filename", "未知文档")
-        full_content = "\n---\n".join([doc.page_content for doc in docs[:3]])
         return summary, f"📄 {source}", full_content
 
-    # 2. 获取该章节下所有块
     chapter_docs = get_documents_by_heading_path(heading_path, include_subchapters=True)
     if not chapter_docs:
-        # 回退
-        full_text = first_doc.page_content
-        summary = extract_relevant_snippets(full_text, query, max_sentences=3)
+        full_content = "\n---\n".join([d.page_content for d in docs[:3]])
+        summary = extract_relevant_snippets(full_content, query, max_sentences=3)
         source = first_doc.metadata.get("filename", "未知文档")
-        full_content = "\n---\n".join([doc.page_content for doc in docs[:3]])
         return summary, f"📄 {source}", full_content
 
-    # 3. 拼接完整内容（按页码顺序）
-    full_content = "\n\n".join([doc.page_content for doc in chapter_docs])
+    full_content = "\n\n".join([d.page_content for d in chapter_docs])
     summary = extract_relevant_snippets(full_content, query, max_sentences=3)
     chapter_path_str = " > ".join(heading_path)
     source = f"{first_doc.metadata.get('filename', '未知文档')} → {chapter_path_str}"
@@ -259,7 +274,7 @@ def extract_relevant_snippets(text: str, query: str, max_sentences: int = 4) -> 
 
 
 # ---------- ReAct 提示词 ----------
-REACT_GENERAL_SYSTEM = load_prompt("react_system.md")
+REACT_GENERAL_SYSTEM = load_prompt("react_prompt.md")
 
 
 def _configured_react_steps() -> int:
@@ -297,11 +312,10 @@ def _is_empty_json_list(value: str) -> bool:
 
 
 def _build_observation_context(tool_name: str, summary: str, full_content: str) -> str:
-    """为下一次 LLM 决策构造紧凑观察 JSON。"""
     summary = summary or "无摘要"
     full_content = full_content or ""
-
-    truncated_full = full_content[:1000] + "..." if len(full_content) > 1000 else full_content
+    # 从 1000 提到 3000
+    truncated_full = full_content[:3000] + "..." if len(full_content) > 3000 else full_content
     return f"观察结果（摘要）：{summary}\n\n观察结果（完整）：{truncated_full}"
 
 
@@ -355,10 +369,18 @@ def react_agent(
                 normalized_input = re.sub(r"\s+", " ", str(tool_input)).strip()
                 action_signature = (str(tool_name).strip(), normalized_input)
                 if action_signature in executed_actions:
-                    yield "[OBSERVATION]📊 已跳过相同工具和参数的重复调用，请基于已有结果回答。"
+                    yield "[OBSERVATION]📊 参数重复被拦截。请换词重试，不要使用相同参数。"
                     messages.append(AIMessage(content=content))
                     messages.append(HumanMessage(
-                        content="该工具和参数已经执行过。不要重复调用，请基于已有观察结果输出 final_answer。"))
+                        content=(
+                            f"参数「{normalized_input}」已调用过。请换一个不同的关键词重新调用 rag_search。\n"
+                            f"参考换词方向：\n"
+                            f"- 换同义词/繁简（編號 ↔ 编号，流水號 ↔ 流水号）\n"
+                            f"- 换成表格字段名（類別、西元年、月份、流水號、SMS申請單號）\n"
+                            f"- 换成相关术语（編碼規則、編號格式）\n"
+                            f"禁止再次使用原参数。"
+                        )
+                    ))
                     continue
 
                 executed_actions.add(action_signature)

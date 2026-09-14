@@ -202,25 +202,13 @@ def get_documents_by_heading_path(heading_path: List[str], include_subchapters: 
 
 
 # ---------- 知识库导入函数 ----------
+from src.retrieval.parse_pdf import parse_pdf_bytes_to_chunks
+
 def chunk_pdf_from_bytes(file_bytes: bytes, filename: str, category: str = "未分类") -> List[Document]:
-    """
-    从字节流中解析 PDF，直接返回 PdfmuseLoader 的原始元素块，不做二次切分。
-    """
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        tmp.write(file_bytes)
-        tmp_path = tmp.name
-
-    try:
-        loader = PdfmuseLoader(tmp_path, mode="elements")
-        docs = loader.load()
-
-        for doc in docs:
-            doc.metadata["filename"] = filename
-            doc.metadata["user_category"] = category
-        return docs  # 直接返回，不做切分
-
-    finally:
-        os.unlink(tmp_path)
+    docs = parse_pdf_bytes_to_chunks(file_bytes, filename)
+    for doc in docs:
+        doc.metadata["user_category"] = category
+    return docs
 
 
 def add_documents_to_store(docs: List[Document]) -> bool:
