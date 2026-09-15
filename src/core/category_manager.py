@@ -7,7 +7,7 @@ from typing import List, Optional
 # 默认放在项目根目录的 data/ 下，可自行调整
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # src/ 的父目录
 PROJECT_ROOT = os.path.dirname(BASE_DIR)  # 项目根目录
-DB_PATH = os.path.join(PROJECT_ROOT, "./db/categories.db")
+DB_PATH = os.path.join(PROJECT_ROOT, "./db/app.db")
 
 def get_connection():
     """获取数据库连接，自动创建 categories 表"""
