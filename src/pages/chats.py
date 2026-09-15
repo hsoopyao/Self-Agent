@@ -154,8 +154,14 @@ def chat_page():
                                                 "如需继续，请在打开允许联网开关。"
                                             ])
                         elif intent == "chat":
-                            stream_gen = direct_chat_stream(user_input, history)
+                            stream_gen = direct_chat_stream(user_input, history=history)
+                        elif intent == "web":
+                            if allow_web:
+                                stream_gen = general_chat_stream(user_input, history=history)
+                            else:
+                                stream_gen = iter(["🔒 未开启联网，无法查询实时信息。请在侧边栏打开「允许联网」开关。"])
                         else:
+                            logger.debug("兜底逻辑 ReAct")
                             stream_gen = react_agent(user_input, history, allow_web=allow_web)
                     else:
                         logger.debug("进入 ReAct")
