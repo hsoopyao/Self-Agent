@@ -10,7 +10,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from src.chat.direct_chat import direct_chat_sync
 from src.chat.general_chat import search_results
-from src.core.config import load_prompt
+from src.core.config import load_prompt, get_temperature
 from src.core.llm_client import get_llm
 from src.retrieval.vectorstore import search_with_score, get_documents_by_heading_path
 from src.ui.ui_components import clean_markdown
@@ -329,7 +329,7 @@ def react_agent(
     ReAct 循环，生成最终回答（流式输出）。
     每次 yield 一段文本（思考、工具调用、观察、最终答案）。
     """
-    llm = get_llm(streaming=True, temperature=0.1)
+    llm = get_llm(streaming=True, temperature=get_temperature("react"))
     system_prompt = REACT_GENERAL_SYSTEM
     if not allow_web:
         system_prompt += "\n本次对话未获得联网授权，禁止调用 web_search；仅可使用内部知识库或直接回答。"

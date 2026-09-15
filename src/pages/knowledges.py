@@ -27,7 +27,7 @@ def main():
                 label_visibility="collapsed"
             )
         with col2:
-            if st.button("创建", use_container_width=True):
+            if st.button("创建", width="stretch"):
                 if new_cat and new_cat.strip():
                     if add_category(new_cat.strip()):
                         st.success(f"分类 '{new_cat.strip()}' 已创建")
@@ -64,7 +64,7 @@ def main():
         else:
             final_category = selected
 
-        if st.button("导入文档", use_container_width=True):
+        if st.button("导入文档", width="stretch"):
             existing_docs = list_documents()
             existing_filenames = [doc["filename"] for doc in existing_docs]
             if uploaded_file.name in existing_filenames:

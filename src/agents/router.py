@@ -5,7 +5,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.tools import tool
 
 from src.core.llm_client import get_llm
-from src.core.config import load_prompt
+from src.core.config import load_prompt, get_temperature
 
 logger = logging.getLogger(__name__)
 
@@ -78,12 +78,12 @@ def route_query(question: str) -> str:
         return "chat"
 
     # 内部知识库（文档、政策等）
-    if is_rag_query:
+    if is_rag_query(question):
         return "rag"
 
     # ---------- 未命中规则，调用 LLM 路由 ----------
     # 原有逻辑保持不变
-    llm = get_llm(streaming=False, temperature=0.1)
+    llm = get_llm(streaming=False, temperature=get_temperature("router"))
     llm_with_tools = llm.bind_tools(tools)
     messages = [
         SystemMessage(content=ROUTER_SYSTEM),

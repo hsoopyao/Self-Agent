@@ -1,4 +1,6 @@
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+
+from src.core.config import get_temperature
 from src.core.llm_client import get_llm
 
 DIRECT_SYSTEM = "你是一个友好的个人助手，名字叫卡卡西。请用口语化、亲切的语气回答用户的闲聊和一般性问题，无需使用外部信息。"
@@ -34,7 +36,7 @@ def direct_chat_stream(question: str, history: list = None):
 
     # 流式生成
     try:
-        llm = get_llm(streaming=True, temperature=0.7)
+        llm = get_llm(streaming=True, temperature=get_temperature("chat"))
         for chunk in llm.stream(messages):
             yield chunk.content
     except Exception as e:
@@ -46,7 +48,7 @@ def direct_chat_stream(question: str, history: list = None):
 
 # 同步版本，非流式
 def direct_chat_sync(question: str, history: list = None) -> str:
-    llm = get_llm(streaming=False, temperature=0.7)
+    llm = get_llm(streaming=False, temperature=get_temperature("chat"))
     messages = [SystemMessage(content="你是一个友好的个人助手，名字叫卡卡西。")]
     if history:
         for msg in history:

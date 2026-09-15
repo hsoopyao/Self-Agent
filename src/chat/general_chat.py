@@ -10,7 +10,7 @@ from tavily import TavilyClient
 from tavily.errors import TimeoutError as TavilyTimeoutError
 
 from src.core.llm_client import get_llm
-from src.core.config import load_prompt
+from src.core.config import load_prompt, get_temperature
 
 GENERAL_SYSTEM = load_prompt("general_prompt.md")
 GENERAL_USER_TEMPLATE = """
@@ -70,7 +70,7 @@ def search_with_timeout(query, timeout=None):
 def general_chat_stream(question: str, history: list = None):
     try:
         # 延迟到实际对话时创建，避免未配置 API Key 时阻断应用启动。
-        llm = get_llm(streaming=True, temperature=0.7)
+        llm = get_llm(streaming=True, temperature=get_temperature("chat"))
         search_result = search_with_timeout(question)
         search_info = f"搜索到的信息：{search_result}" if search_result else ""
         messages = [
