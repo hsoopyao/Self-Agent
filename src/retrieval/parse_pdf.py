@@ -8,9 +8,6 @@ import pymupdf4llm
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-import pymupdf
-from collections import Counter
-
 logger = logging.getLogger(__name__)
 
 # ---------- 分块配置 ----------
@@ -22,6 +19,27 @@ MAX_SECTION_LEN = 8000      # 单个 section 超过这个长度才二次切分
 # Markdown 标题正则：匹配行首的 # ## ### ...
 _HEADER_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 
+def _extract_table_fields(content: str, max_fields: int = 12) -> list:
+    """从 Markdown 表格里提取字段名（前 4 行，排除分隔行和占位符）"""
+    fields = []
+    for line in content.split("\n")[:4]:
+        s = line.strip()
+        if not s.startswith("|"):
+            continue
+        # 跳过 |---|---| 分隔行
+        if set(s) <= set("|-: "):
+            continue
+        for cell in s.strip("|").split("|"):
+            c = cell.strip().strip("`*").strip()
+            if not c:
+                continue
+            if c.isdigit():
+                continue
+            if c.lower() in ("col2", "col3", "col4", "col5"):
+                continue
+            if c not in fields:
+                fields.append(c)
+    return fields[:max_fields]
 
 def _split_by_headers(full_text: str) -> List[Tuple[int, int, List[str], str]]:
     """
@@ -118,6 +136,80 @@ def detect_body_start_page(pages, min_chars=200):
 
     return 0
 
+def _supplement_page_md(page_md: str, page_num: int, doc) -> str:
+    """
+    用底层 PyMuPDF 的文本补全 pymupdf4llm 丢失的内容。
+    关键：用连续多行组成"单元"作为指纹，避免短词误判。
+    """
+    if page_num > doc.page_count:
+        return page_md
+
+    page = doc[page_num - 1]
+    raw_text = page.get_text()
+
+    def _norm(s: str) -> str:
+        return re.sub(r"[\s`*_\\|\[\]（）()：:；;，,。.、]", "", s)
+
+    md_norm = _norm(page_md)
+
+    # 把底层文本按"连续非空行"组成单元，每个单元 2-5 行
+    raw_lines = raw_text.split("\n")
+
+    missing_units = []
+    i = 0
+    while i < len(raw_lines):
+        # 收集连续非空行
+        unit_lines = []
+        while i < len(raw_lines) and len(unit_lines) < 5:
+            line = raw_lines[i].strip()
+            if line:
+                unit_lines.append(line)
+                i += 1
+            else:
+                # 空行是单元边界
+                if unit_lines:
+                    break
+                i += 1
+
+        if not unit_lines:
+            i += 1
+            continue
+
+        unit = " ".join(unit_lines)
+
+        # 跳过页眉页脚
+        if any(kw in unit for kw in [
+            "System Requirement Analysis",
+            "DMP_Workplace_V3.1.1.1",
+            "_SA_V1.0",
+        ]):
+            continue
+        # 跳过纯页码
+        if unit.strip().isdigit():
+            continue
+
+        unit_norm = _norm(unit)
+        if len(unit_norm) < 6:
+            continue
+
+        # 用整个单元作为指纹
+        if unit_norm not in md_norm:
+            missing_units.append(unit)
+
+    if not missing_units:
+        return page_md
+
+    supplement = "\n".join(missing_units)
+
+    # 插到 #### 标题之前（保持续表归属上一节）
+    idx = page_md.find("####")
+    if idx > 0:
+        page_md = page_md[:idx] + "\n" + supplement + "\n\n" + page_md[idx:]
+    else:
+        page_md = page_md.rstrip() + "\n\n" + supplement
+
+    return page_md
+
 def parse_pdf_to_chunks(pdf_path, filename, chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP):
     # 自适应检测页眉页脚 y 边界
     top_y, bottom_y = detect_edge_y_bounds(pdf_path)
@@ -138,6 +230,14 @@ def parse_pdf_to_chunks(pdf_path, filename, chunk_size=CHUNK_SIZE, chunk_overlap
     if body_start > 0:
         logger.info(f"{filename}：跳过前 {body_start} 页（封面/目录/说明）")
         pages = pages[body_start:]
+
+    raw_doc = pymupdf.open(pdf_path)
+    try:
+        for p in pages:
+            page_num = p["metadata"].get("page", 1)
+            p["text"] = _supplement_page_md(p["text"], page_num, raw_doc)
+    finally:
+        raw_doc.close()
 
     # 拼接 + 页偏移
     full_text = ""
@@ -214,20 +314,25 @@ def parse_pdf_to_chunks(pdf_path, filename, chunk_size=CHUNK_SIZE, chunk_overlap
                 if len(sub) < MIN_CHUNK_LEN:
                     continue
 
-                # 表格块：加语境前缀，帮助向量检索命中
-                if sub.startswith("|"):
-                    prefix_parts = []
-                    if heading_path:
-                        prefix_parts.append("章节：" + " > ".join(heading_path))
-                    prefix_parts.append("内容类型：表格")
-                    sub = f"【{'；'.join(prefix_parts)}】\n{sub}"
-
+                # ⚠️ 先反查位置（用原始文本），再加前缀
                 pos = full_text.find(sub, cursor)
                 if pos == -1:
                     pos = sec_start
                 else:
                     cursor = max(cursor, pos)
                 page_num = _find_page(pos, page_offsets)
+
+                # 表格块：加语境前缀
+                if sub.startswith("|"):
+                    fields = _extract_table_fields(sub)
+                    prefix_parts = []
+                    if heading_path:
+                        prefix_parts.append("章节：" + " > ".join(heading_path))
+                    prefix_parts.append("内容类型：表格")
+                    if fields:
+                        prefix_parts.append("字段：" + "、".join(fields))
+                    sub = f"【{'；'.join(prefix_parts)}】\n{sub}"
+
                 chunks.append(Document(
                     page_content=sub,
                     metadata={

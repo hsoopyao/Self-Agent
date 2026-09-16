@@ -31,15 +31,76 @@ def _summarize_text(text: str, max_sentences: int = 2) -> str:
         summary += "……"
     return summary
 
+def _build_table_summary(content: str, meta: dict, max_len: int = 1500) -> str:
+    """构建表格摘要：表头 + 表格内容"""
+    heading = meta.get("heading_path_str", "无章节")
+    page = meta.get("page", "?")
+    filename = meta.get("filename", "未知文件")
+
+    # 提取字段名
+    fields = _extract_table_fields(content)
+
+    lines = [
+        f"【表格】来源：{filename} · {heading} · p.{page}",
+    ]
+    if fields:
+        lines.append(f"【字段】{'、'.join(fields[:15])}")
+    lines.append("【内容】")
+    lines.append(content[:max_len])
+    return "\n".join(lines)
+
+def _extract_table_fields(content: str) -> list:
+    """从 Markdown 表格里提取字段名（前 3 行，排除分隔行）"""
+    fields = []
+    for line in content.split("\n")[:4]:
+        s = line.strip()
+        if not s.startswith("|"):
+            continue
+        # 跳过分隔行 |---|---|
+        if set(s) <= set("|- "):
+            continue
+        for cell in s.strip("|").split("|"):
+            c = cell.strip().strip("`*").strip()
+            if c and not c.isdigit() and c.lower() not in ("col2", "col3", "col4"):
+                if c not in fields:
+                    fields.append(c)
+    return fields
+
+def _get_same_page_chunks(filename: str, page: int) -> list:
+    from src.retrieval.vectorstore import get_vectorstore
+    vs = get_vectorstore()
+    data = vs._collection.get(include=["documents", "metadatas"])
+    return [
+        {"content": doc, "metadata": meta}
+        for doc, meta in zip(data["documents"], data["metadatas"])
+        if meta.get("filename") == filename and meta.get("page") == page
+    ]
+
+
+def _strip_table_prefix(text: str) -> str:
+    """去掉表格 chunk 的【】前缀，保留表格原文"""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if line.strip().startswith("|"):
+            return "\n".join(lines[i:])
+    return text
 
 # ---------- 工具函数 ----------
 def _is_table_chunk(text: str) -> bool:
-    """判断 chunk 是否为表格（前 200 字里出现 | 行）"""
-    head = text[:300]
-    return head.strip().startswith("|") or head.count("|") >= 5
+    """判断 chunk 是否包含表格，跳过【】前缀行"""
+    for line in text.split("\n")[:5]:
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("【") and "】" in line:
+            continue   # 跳过前缀行
+        return line.startswith("|")
+    return False
 
 def execute_rag(query: str) -> Tuple[str, str, str]:
-    has_match, docs, score = search_with_score(query, k=3, score_threshold=0.0)
+    has_match, docs, score = search_with_score(
+        query, k=3, score_threshold=st.session_state.config_score_threshold
+    )
     if not has_match or not docs:
         return (
             f"【未命中】知识库中未找到与「{query}」相关的内容。"
@@ -48,18 +109,27 @@ def execute_rag(query: str) -> Tuple[str, str, str]:
         )
 
     first_doc = docs[0]
+    page = first_doc.metadata.get("page")
+    filename = first_doc.metadata.get("filename")
 
     # 新增：命中表格时，直接返回表格原文，不展开章节
-    if _is_table_chunk(first_doc.page_content):
-        content = first_doc.page_content
-        source = (
-            f"{first_doc.metadata.get('filename', '?')} · "
-            f"{first_doc.metadata.get('heading_path_str', '')} · "
-            f"p.{first_doc.metadata.get('page', '?')}"
-        )
-        # 摘要保留表格前 200 字 + 表格本身
-        summary = content[:300]
-        return summary, f"📄 {source}", content
+    if not _is_table_chunk(first_doc.page_content) and page and filename:
+        same_page = _get_same_page_chunks(filename, page)
+        tables = [c for c in same_page if _is_table_chunk(c["content"])]
+        if tables:
+            parts = [
+                f"[{filename} · {first_doc.metadata.get('heading_path_str')} · p.{page}]",
+                first_doc.page_content,
+            ]
+            for t in tables:
+                parts.append("\n【同页表格】")
+                parts.append(_strip_table_prefix(t["content"]))
+            combined = "\n\n".join(parts)
+            source = (
+                f"{filename} · {first_doc.metadata.get('heading_path_str')} · "
+                f"p.{page}（含同页表格）"
+            )
+            return combined[:3000], f"📄 {source}", combined
 
     # 非表格：原来的逻辑继续
     heading_path = first_doc.metadata.get("heading_path")
@@ -417,6 +487,7 @@ def react_agent(
                     summary,
                     full_content,
                 )
+                messages.append(HumanMessage(content=observation_context))
             else:
                 yield "[FINAL]抱歉，我无法继续推理，请重试。"
                 return
