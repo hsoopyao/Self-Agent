@@ -13,7 +13,7 @@ from src.ui.sidebar import render_sidebar
 from src.ui.ui_components import apply_theme
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-st.set_page_config(page_title="智能助手", layout="centered")
+st.set_page_config(page_title="智能助手", layout="wide")
 
 setup_logging()
 logger = logging.getLogger(__name__)
