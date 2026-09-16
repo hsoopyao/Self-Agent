@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def chat_page():
-    st.title("智能助手")
+    # st.title("智能小助手")
 
     if "messages" not in st.session_state:
         st.session_state.messages = [
