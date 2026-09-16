@@ -152,7 +152,7 @@ def ensure_vectorstore_loaded() -> bool:
             _ = get_vectorstore()
         st.session_state.vectorstore_loaded = True
         st.session_state.vectorstore_error = None
-        st.toast("✅ 向量库加载成功", icon="✅")
+        st.toast("向量库加载成功", icon="✅")
         return True
     except Exception as e:
         st.session_state.vectorstore_error = str(e)
