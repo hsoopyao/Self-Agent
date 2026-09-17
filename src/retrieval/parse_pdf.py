@@ -74,6 +74,27 @@ def _split_by_headers(full_text: str) -> List[Tuple[int, int, List[str], str]]:
     return sections
 
 
+def _mark_cross_references(text: str) -> str:
+    """
+    把正文里"引用其他任务"的部分加标记，提示 LLM 不是归属切换。
+    特征：如 "完工後觸發"3.5.1.1.2 T1B-PO..." 这种引用。
+    """
+    import re
+    # 匹配 "觸發"XXX 任务名" 的模式
+    # 简化：如果一段话里出现 "觸發" + 任务编号 + 任务名，加标记
+    def repl(m):
+        return f"【引用其他任务，非本任务内容】{m.group(0)}【引用结束】"
+
+    # 匹配 "觸發"XXX T1B-PO..." 这种
+    pattern = r'完工後觸發"[\d.]+\s+[^"]+"'
+    text = re.sub(pattern, repl, text)
+
+    # 匹配 "參考"..._SA" 这种
+    pattern2 = r'參考"[^"]+_SA"'
+    text = re.sub(pattern2, repl, text)
+
+    return text
+
 def _find_page(char_pos: int, page_offsets: List[Tuple[int, int, int]]):
     """根据字符位置反查页码"""
     for start, end, page_num in page_offsets:
@@ -298,6 +319,9 @@ def parse_pdf_to_chunks(pdf_path, filename, chunk_size=CHUNK_SIZE, chunk_overlap
     for sec_start, sec_end, heading_path, sec_text in sections:
         if len(sec_text.strip()) < MIN_CHUNK_LEN:
             continue
+
+        # 标记跨任务引用(【引用其他任务，非本任务内容】"3.5.1.1.2 T1B-PO 確認信息完整性與正確性"【引用结束】)
+        sec_text = _mark_cross_references(sec_text)
 
         # 表格整体保留，非表格按大小切
         for block_type, block in split_keep_tables(sec_text):

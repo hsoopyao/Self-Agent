@@ -3,6 +3,7 @@ import logging
 
 import streamlit as st
 
+from src.retrieval.task_index import expand_query_with_task_index
 from src.agents.react_agent import react_agent
 from src.agents.router import route_query
 from src.chat.direct_chat import direct_chat_stream
@@ -100,7 +101,9 @@ def chat_page():
 
                 # 全局逻辑
                 if stream_gen is None:
-                    intent = route_query(user_input)
+                    intent = route_query(user_input, history)
+                    # 保存意图到本轮用户消息
+                    current_user_message["intent"] = intent
                     logger.debug(f"{user_input}, intent: {intent}")
                     # 获取联网开关
                     allow_web = st.session_state.allow_web_switch
@@ -111,6 +114,7 @@ def chat_page():
                     # 无命中React关键词
                     if not need_react:
                         if intent == "rag":
+
                             # 确保向量库已加载
                             if not ensure_vectorstore_loaded():
                                 stream_gen = iter(["⚠️ 向量库加载失败，无法检索本地知识。"])
@@ -125,6 +129,9 @@ def chat_page():
                                 else:
                                     # 在 RAG 分支中，调用检索前
                                     enriched_query = enrich_query_with_history(user_input, history)
+                                    # 检索前展开任务编号
+                                    enriched_query = expand_query_with_task_index(enriched_query)
+
                                     has_match, docs, score = search_with_score(
                                         enriched_query,
                                         k=3,
@@ -157,6 +164,7 @@ def chat_page():
                             stream_gen = direct_chat_stream(user_input, history=history)
                         elif intent == "web":
                             if allow_web:
+                                logger.debug(f"history: {history}")
                                 stream_gen = general_chat_stream(user_input, history=history)
                             else:
                                 stream_gen = iter(["🔒 未开启联网，无法查询实时信息。请在侧边栏打开「允许联网」开关。"])
