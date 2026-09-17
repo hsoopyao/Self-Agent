@@ -27,6 +27,7 @@ _initialized = False
 
 
 # 获取 embedding 模型单例
+@st.cache_resource
 def get_embeddings():
     global _embeddings
     if _embeddings is None:
@@ -39,6 +40,7 @@ def get_embeddings():
 
 
 # 全局单例：获取向量库实例（仅初始化一次）
+@st.cache_resource
 def get_vectorstore():
     global _vectorstore, _initialized
     if _vectorstore is None:
@@ -178,6 +180,11 @@ def search_with_score(query: str, k: int = 2, score_threshold: float = 0.5):
     docs = [doc for doc, _ in docs_and_scores]
     return True, docs, top_score
 
+@st.cache_resource
+def _get_all_docs_cache(collection_count: int):
+    """缓存全库数据，collection_count 变化时自动刷新"""
+    vs = get_vectorstore()
+    return vs._collection.get(include=["documents", "metadatas"])
 
 def get_documents_by_heading_path(heading_path: List[str], include_subchapters: bool = True) -> List[Document]:
     """
@@ -185,8 +192,8 @@ def get_documents_by_heading_path(heading_path: List[str], include_subchapters: 
     需要 metadata 中含有 'heading_path_str' 字段。
     """
     vectorstore = get_vectorstore()
-    # 获取全部数据（若数据量巨大，可考虑分页，但通常几千块内没问题）
-    all_data = vectorstore.get(include=["documents", "metadatas"])
+    total = vectorstore._collection.count()
+    all_data = _get_all_docs_cache(total)
     target_prefix = " > ".join(heading_path)
     matched = []
     for content, meta in zip(all_data['documents'], all_data['metadatas']):
