@@ -61,9 +61,22 @@ def is_rag_query(question: str) -> bool:
     # 4. 默认为 False（即非 RAG）
     return False
 
-def route_query(question: str) -> str:
+def route_query(question: str, history: list = None) -> str:
     """返回 'rag' / 'web' / 'chat'，通过规则优先匹配，未命中再调用 LLM。"""
     q_lower = question.lower().strip()
+
+    if history and len(q_lower) < 30:
+        # 追问特征：短句、含"呢/吗/？/也对/不是/不对/那个/这个"
+        followup_markers = ["？", "?", "呢", "吗", "不对", "不是", "也对", "错了", "更正", "刚"]
+        is_followup = any(m in q_lower for m in followup_markers) or len(q_lower) < 10
+
+        if is_followup:
+            # 从历史里找最近一条带 intent 的记录
+            for msg in reversed(history[-6:]):
+                last_intent = msg.get("intent")
+                if last_intent:
+                    logger.debug(f"[路由] 追问继承上一轮意图: {last_intent}")
+                    return last_intent
 
     # ---------- 规则匹配（高频场景） ----------
 
