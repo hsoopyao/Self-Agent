@@ -1,8 +1,11 @@
 import sqlite3
 import os
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import Dict, Optional
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "../db/memory.db")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+DB_PATH = Path(PROJECT_ROOT, "./db/memory.db")
 
 def get_connection():
     """获取数据库连接，自动创建表"""
