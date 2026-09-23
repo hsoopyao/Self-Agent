@@ -2,6 +2,7 @@
 import logging
 
 import streamlit as st
+from timm.models import inception_next
 
 from src.core.context_manager import count_tokens, trim_history
 from src.core.config import INTRODUCE
@@ -112,7 +113,6 @@ def chat_page():
                                 else:
                                     stream_gen = iter([
                                         "🔒 内部知识库中没有找到足够相关的信息，本次未自动发送到外部网络。"
-                                        "如需继续，请在问题中明确写明“联网搜索”。"
                                     ])
                     elif intent == "chat":
                         from src.core.memory_manager import get_all_memories
@@ -121,6 +121,13 @@ def chat_page():
                         if memories:
                             memory_context = "；".join([f"{k}:{v}" for k, v in memories.items()])
                         stream_gen = direct_chat_stream(user_input, history, memory_context=memory_context)
+                    elif intent == "web":
+                        if allow_web:
+                            stream_gen = general_chat_stream(user_input, history=history)
+                        else:
+                            stream_gen = iter([
+                                "🔒 目前无法联网，如需联网查询请打开允许联网开关。"
+                            ])
                     else:
                         logger.debug("进入 ReAct")
                         stream_gen = react_agent(
