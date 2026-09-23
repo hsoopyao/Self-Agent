@@ -28,48 +28,54 @@ tools = [rag_search, web_search, direct_chat]
 # 路由提示词 加载 Prompt
 ROUTER_SYSTEM = load_prompt("router_system.txt")
 
-def route_query(question: str) -> str:
-    """返回 'rag' / 'web' / 'chat'，通过规则优先匹配，未命中再调用 LLM。"""
+def route_query(question: str, history: list | None = None) -> tuple[str, str]:
+    """返回 (resolved_query, intent)。
+    - resolved_query：结合 history 补全后的独立查询
+    - intent：'rag' / 'web' / 'chat'
+    """
     q_lower = question.lower().strip()
 
-    # ---------- 规则匹配（高频场景） ----------
-    # 1. 电影/排片/影院
+    # ---------- 规则匹配（只对"本身已完整"的问题生效） ----------
+    # 注意：省略式追问几乎不会命中这些关键词，自然会落到 LLM 分支
     movie_keywords = ["排片", "影院", "电影院", "电影", "场次", "猫眼", "上映"]
     if any(kw in q_lower for kw in movie_keywords):
-        return "web"   # 后续会触发 ReAct（见 chat_page 中的 need_react 逻辑）
+        return question, "web"
 
-    # 2. 天气
     weather_keywords = ["天气", "温度", "预报", "下雨", "晴", "多云", "气温"]
     if any(kw in q_lower for kw in weather_keywords):
-        return "web"
+        return question, "web"
 
-    # 3. 内部知识库（文档、政策等）
     rag_keywords = ["文档", "政策", "公司", "内部", "规定", "制度", "手册", "说明"]
     if any(kw in q_lower for kw in rag_keywords):
-        return "rag"
+        return question, "rag"
 
-    # 4. 闲聊/问候（可简单判断，或直接走 chat 兜底）
     chat_keywords = ["你好", "介绍", "你是谁", "功能", "能力"]
     if any(kw in q_lower for kw in chat_keywords):
-        return "chat"
+        return question, "chat"
 
-    # ---------- 未命中规则，调用 LLM 路由 ----------
-    # 原有逻辑保持不变
+    # ---------- LLM 路由（带 history） ----------
     llm = get_llm(streaming=False, temperature=0.1)
     llm_with_tools = llm.bind_tools(tools)
-    messages = [
-        SystemMessage(content=ROUTER_SYSTEM),
-        HumanMessage(content=question)
-    ]
+
+    messages = [SystemMessage(content=ROUTER_SYSTEM)]
+    if history:
+        # history 可以是 [{"role": "user", "content": ...}, ...]
+        # 也可以是 LangChain Message 列表，直接 extend 即可
+        messages.extend(history[-6:])
+    messages.append(HumanMessage(content=question))
+
     response = llm_with_tools.invoke(messages)
     logger.debug(f"response.tool_calls: {response.tool_calls}")
+
     if response.tool_calls:
-        tool_name = response.tool_calls[0]["name"]
-        if tool_name == "rag_search":
-            return "rag"
-        elif tool_name == "web_search":
-            return "web"
-        elif tool_name == "direct_chat":
-            return "chat"
+        tc = response.tool_calls[0]
+        tool_name = tc.get("name", "")
+        args = tc.get("args", {}) or {}
+        # 关键点：工具参数里的 query 就是 LLM 结合历史补全后的查询
+        resolved_query = (args.get("query") or "").strip() or question
+
+        mapping = {"rag_search": "rag", "web_search": "web", "direct_chat": "chat"}
+        return resolved_query, mapping.get(tool_name, "chat")
+
     # fallback
-    return "chat"
+    return question, "chat"

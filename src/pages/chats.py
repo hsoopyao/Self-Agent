@@ -2,6 +2,7 @@
 import logging
 
 import streamlit as st
+from timm.models import inception_next
 
 from src.core.context_manager import count_tokens, trim_history
 from src.core.config import INTRODUCE
@@ -81,53 +82,44 @@ def chat_page():
 
                 # 全局逻辑
                 if stream_gen is None:
-                    intent = route_query(user_input)
-                    logger.debug(f"{user_input}, intent: {intent}")
-                    # 获取联网开关
+                    resolved_query, intent = route_query(user_input, history=history)
+                    logger.debug(f"{user_input} -> {resolved_query}, intent: {intent}")
+
                     allow_web = st.session_state.allow_web_switch
-                    # 读取关键词配置
                     keywords_str = st.session_state.config_complex_keywords
                     complex_keywords = [kw.strip() for kw in keywords_str.split(",") if kw.strip()]
-                    # 搜索内部文件但无对比
-                    if intent == "rag" and not any(kw in user_input for kw in complex_keywords):
+
+                    if intent == "rag" and not any(kw in resolved_query for kw in complex_keywords):
                         docs_list = list_documents()
                         if not docs_list:
-                            if allow_web:
-                                stream_gen = general_chat_stream(user_input, history=history)
-                            else:
-                                stream_gen = iter(["📭 内部知识库为空，请先在侧边栏上传相关 PDF 文档，然后再次提问。"])
+                            stream_gen = (general_chat_stream(resolved_query, history=history)
+                                          if allow_web else
+                                          iter(["📭 内部知识库为空，请先在侧边栏上传相关 PDF 文档，然后再次提问。"]))
                         else:
                             has_match, docs, score = search_with_score(
-                                user_input,
-                                k=4,
+                                resolved_query, k=4,
                                 score_threshold=st.session_state.config_score_threshold,
                             )
-                            logger.debug(f'{has_match}, docs: {len(docs)}, score: {score}')
                             if has_match:
-                                stream_gen = rag_chain_with_docs(docs, user_input)
+                                stream_gen = rag_chain_with_docs(docs, resolved_query)
                             else:
-                                if allow_web:
-                                    logger.debug("no match but allow web...")
-                                    stream_gen = general_chat_stream(user_input, history=history)
-                                else:
-                                    stream_gen = iter([
-                                        "🔒 内部知识库中没有找到足够相关的信息，本次未自动发送到外部网络。"
-                                        "如需继续，请在问题中明确写明“联网搜索”。"
-                                    ])
+                                stream_gen = (general_chat_stream(resolved_query, history=history)
+                                              if allow_web else
+                                              iter(["🔒 内部知识库中没有找到足够相关的信息，本次未自动发送到外部网络。"]))
+
                     elif intent == "chat":
                         from src.core.memory_manager import get_all_memories
                         memories = get_all_memories()
-                        memory_context = ""
-                        if memories:
-                            memory_context = "；".join([f"{k}:{v}" for k, v in memories.items()])
-                        stream_gen = direct_chat_stream(user_input, history, memory_context=memory_context)
+                        memory_context = "；".join(f"{k}:{v}" for k, v in memories.items()) if memories else ""
+                        stream_gen = direct_chat_stream(resolved_query, history, memory_context=memory_context)
+
+                    elif intent == "web":
+                        stream_gen = (general_chat_stream(resolved_query, history=history)
+                                      if allow_web else
+                                      iter(["🔒 目前无法联网，如需联网查询请打开允许联网开关。"]))
+
                     else:
-                        logger.debug("进入 ReAct")
-                        stream_gen = react_agent(
-                            user_input,
-                            history,
-                            allow_web=allow_web,
-                        )
+                        stream_gen = react_agent(resolved_query, history, allow_web=allow_web)
 
                 # 如果 stream_gen 依然为 None，兜底
                 if stream_gen is None:
