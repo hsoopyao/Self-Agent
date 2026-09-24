@@ -143,6 +143,10 @@ def list_history_versions(filename: str) -> list:
     for p in versions:
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
+            # 修复：历史版本无过滤当前文档
+            # 精确匹配
+            if data.get("filename") != filename:
+                continue
             result.append({
                 "path": str(p),
                 "timestamp": data.get("timestamp", ""),
