@@ -98,9 +98,22 @@ def _is_table_chunk(text: str) -> bool:
     return False
 
 def execute_rag(query: str) -> Tuple[str, str, str]:
+
+    from src.retrieval.heading_search import search_by_heading_keywords, merge_docs
+
+    heading_docs = search_by_heading_keywords(query, top_k=5)
+
+    # 向量检索
     has_match, docs, score = search_with_score(
         query, k=3, score_threshold=st.session_state.config_score_threshold
     )
+
+    # 合并：heading 命中优先
+    if heading_docs:
+        docs = merge_docs(heading_docs, docs)
+        has_match = True
+        logger.info(f"[execute_rag] heading 匹配 + 向量: {len(docs)} 条")
+
     if not has_match or not docs:
         return (
             f"【未命中】知识库中未找到与「{query}」相关的内容。"

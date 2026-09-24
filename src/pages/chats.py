@@ -22,13 +22,15 @@ from src.ui.ui_components import (
     render_observation,
     render_thought,
 )
+from src.retrieval.heading_search import (
+    search_by_heading_keywords,
+    merge_docs,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def chat_page():
-    # st.title("智能小助手")
-
     if "messages" not in st.session_state:
         st.session_state.messages = [
             {"role": "assistant", "content": INTRODUCE}
@@ -40,8 +42,6 @@ def chat_page():
             st.markdown(msg["content"])
 
     if user_input := st.chat_input("请输入您的问题..."):
-        # 先保存进入本轮前的历史，再单独追加当前问题。
-        # 这样生成阶段无需依赖 messages[:-1]，也不会重复传入当前问题。
         history = list(st.session_state.messages)
         current_user_message = {"role": "user", "content": user_input}
         st.session_state.messages.append(current_user_message)
@@ -51,18 +51,16 @@ def chat_page():
 
         with st.chat_message("assistant"):
             # ---------- 检查是否超限，需要压缩 ----------
-            # 计算当前总 token（包括刚添加的用户消息）
             total_tokens = count_tokens(st.session_state.messages)
             threshold = st.session_state.config_max_tokens
             if total_tokens > threshold:
-                # 显示压缩等待提示（使用 spinner）
                 with st.spinner("⏳ 上下文接近上限，正在压缩历史摘要，请稍候..."):
-                    # 压缩历史（只压缩历史部分，当前用户消息保留）
-                    compressed_history = trim_history(history, max_tokens=threshold,
-                                                      target_ratio=st.session_state.config_target_ratio)
-                    # 重建消息列表：压缩后的历史 + 当前用户消息
+                    compressed_history = trim_history(
+                        history,
+                        max_tokens=threshold,
+                        target_ratio=st.session_state.config_target_ratio,
+                    )
                     st.session_state.messages = compressed_history + [current_user_message]
-                    # 更新 history 为压缩后的历史（供后续生成使用）
                     history = compressed_history
                     st.toast("✅ 压缩完成，正在生成回答...")
 
@@ -72,28 +70,19 @@ def chat_page():
             try:
                 stream_gen = None
 
-                # 将当前问题与最近的对话历史结合，生成一个更完整的查询词
                 def enrich_query_with_history(query: str, history: list) -> str:
-                    """
-                    根据最近的历史消息，补全当前查询中的指代词。
-                    例如：如果历史中提到了某个文件名，且当前查询包含“资料”，则补全文件名。
-                    """
                     import re
-
-                    # 如果查询已经包含明确的文件名或版本号，直接返回原查询
                     if re.search(r'\.pdf|V\d+\.\d+|\d+\.\d+\.\d+', query, re.IGNORECASE):
                         return query
-
-                    # 从历史中提取最近出现的文件名/版本号（取最近3条消息）
-                    for msg in reversed(history[-6:]):  # 最近6条消息（3轮）
-                        if msg["role"] == "assistant" or msg["role"] == "user":
+                    for msg in reversed(history[-6:]):
+                        if msg["role"] in ("assistant", "user"):
                             content = msg["content"]
-                            # 提取文件名（包含 .pdf）或版本号（如 V3.1.1.1）
-                            match = re.search(r'([\w\-_]+\.pdf|V\d+\.\d+\.\d+\.\d+|[A-Z]_\d+\.\d+\.\d+)', content,
-                                              re.IGNORECASE)
+                            match = re.search(
+                                r'([\w\-_]+\.pdf|V\d+\.\d+\.\d+\.\d+|[A-Z]_\d+\.\d+\.\d+)',
+                                content, re.IGNORECASE
+                            )
                             if match:
                                 file_ref = match.group(1)
-                                # 如果当前查询包含指代词（如“资料”、“文件”、“文档”），则补全
                                 if any(kw in query for kw in ["资料", "文件", "文档", "该", "此", "这个"]):
                                     return f"{file_ref} {query}"
                                 break
@@ -102,20 +91,15 @@ def chat_page():
                 # 全局逻辑
                 if stream_gen is None:
                     intent = route_query(user_input, history)
-                    # 保存意图到本轮用户消息
                     current_user_message["intent"] = intent
                     logger.debug(f"{user_input}, intent: {intent}")
-                    # 获取联网开关
                     allow_web = st.session_state.allow_web_switch
-                    # 读取关键词配置
                     keywords_str = st.session_state.config_complex_keywords
                     complex_keywords = [kw.strip() for kw in keywords_str.split(",") if kw.strip()]
                     need_react = any(kw in user_input for kw in complex_keywords)
-                    # 无命中React关键词
+
                     if not need_react:
                         if intent == "rag":
-
-                            # 确保向量库已加载
                             if not ensure_vectorstore_loaded():
                                 stream_gen = iter(["⚠️ 向量库加载失败，无法检索本地知识。"])
                             else:
@@ -127,55 +111,86 @@ def chat_page():
                                         stream_gen = iter(
                                             ["📭 内部知识库为空，请先在侧边栏上传相关 PDF 文档，然后再次提问。"])
                                 else:
-                                    # 在 RAG 分支中，调用检索前
+                                    # ==================================================
+                                    # ---------- 1. heading 关键词匹配（优先） ----------
+                                    # top_k 从 8 降到 3，减少噪声
+                                    # ==================================================
+                                    heading_docs = search_by_heading_keywords(user_input, top_k=3)
+
+                                    # ---------- 2. 查询改写 + 向量检索 ----------
                                     enriched_query = enrich_query_with_history(user_input, history)
-                                    # 检索前展开任务编号
                                     enriched_query = expand_query_with_task_index(enriched_query)
 
                                     has_match, docs, score = search_with_score(
                                         enriched_query,
-                                        k=3,
+                                        k=5,
                                         score_threshold=st.session_state.config_score_threshold,
                                     )
-                                    logger.debug(f'{has_match}, docs: {len(docs)}, score: {score}')
+                                    logger.debug(f"向量检索: 命中={has_match}, docs={len(docs)}, score={score}")
+
+                                    # ==================================================
+                                    # ---------- 3. 合并：heading 匹配优先 ----------
+                                    # merge_docs(heading_docs, docs) 保持 heading_docs 在前
+                                    # 不再做 docs.sort（避免按 page 重排打乱顺序）
+                                    # ==================================================
+                                    if heading_docs:
+                                        docs = merge_docs(heading_docs, docs)
+                                        has_match = True
+                                        score = max(score, 0.7)
+                                        logger.info(f"[RAG] heading 匹配 + 向量补充: {len(docs)} 条")
+
+                                    # ==================================================
+                                    # ---------- 4. 章节展开 ----------
+                                    # 锚点必须用 heading_docs[0]（heading-search 的 top1）
+                                    # 不能用 docs[0]（可能被向量检索的其他结果干扰）
+                                    # ==================================================
                                     if has_match:
-                                        # 获取最相关块的 heading_path，并拉取整章
-                                        first_doc = docs[0]
-                                        heading_path = first_doc.metadata.get("heading_path")
-                                        if heading_path:
-                                            full_chapter_docs = get_documents_by_heading_path(heading_path,
-                                                                                              include_subchapters=True)
-                                            if full_chapter_docs:
-                                                stream_gen = rag_chain_with_docs(full_chapter_docs, user_input)
-                                            else:
-                                                stream_gen = rag_chain_with_docs(docs, user_input)  # 回退
-                                        else:
-                                            stream_gen = rag_chain_with_docs(docs, user_input)
+                                        anchor_doc = heading_docs[0] if heading_docs else docs[0]
+                                        heading_path = anchor_doc.metadata.get("heading_path")
+                                        logger.info(f"[RAG] 章节展开锚点: {heading_path!r}")
+
+                                        chapter_docs = get_documents_by_heading_path(
+                                            heading_path, include_subchapters=True
+                                        ) if heading_path else None
+
+                                        use_docs = docs
+                                        if chapter_docs and len(chapter_docs) > 1:
+                                            use_docs = chapter_docs
+                                        elif chapter_docs and len(chapter_docs) == 1 and len(chapter_docs[0].page_content) >= 500:
+                                            use_docs = chapter_docs
+
+                                        logger.info(
+                                            f"[RAG] 使用 {len(use_docs)} 条 docs"
+                                            f"（章展开={len(chapter_docs) if chapter_docs else 0}）"
+                                        )
+
+                                        stream_gen = rag_chain_with_docs(use_docs, user_input)
                                     else:
                                         if allow_web:
-                                            logger.debug("no match but allow web...")
                                             stream_gen = general_chat_stream(user_input, history=history)
                                         else:
-                                            stream_gen = iter([
-                                                "🔒 内部知识库中没有找到足够相关的信息，本次未自动发送到外部网络。"
-                                                "如需继续，请在打开允许联网开关。"
-                                            ])
+                                            stream_gen = iter(["🔒 内部知识库中没有找到足够相关的信息。"])
+
                         elif intent == "chat":
                             stream_gen = direct_chat_stream(user_input, history=history)
+
                         elif intent == "web":
                             if allow_web:
                                 logger.debug(f"history: {history}")
                                 stream_gen = general_chat_stream(user_input, history=history)
                             else:
-                                stream_gen = iter(["🔒 未开启联网，无法查询实时信息。请在侧边栏打开「允许联网」开关。"])
+                                stream_gen = iter(
+                                    ["🔒 未开启联网，无法查询实时信息。请在侧边栏打开「允许联网」开关。"])
+
                         else:
                             logger.debug("兜底逻辑 ReAct")
                             stream_gen = react_agent(user_input, history, allow_web=allow_web)
+
                     else:
                         logger.debug("进入 ReAct")
                         stream_gen = react_agent(user_input, history, allow_web=allow_web)
 
-                # 如果 stream_gen 依然为 None，兜底
+                # 兜底
                 if stream_gen is None:
                     stream_gen = iter(["⚠️ 抱歉，我无法处理这个问题，请重试。"])
 
@@ -184,7 +199,6 @@ def chat_page():
                 has_content = False
                 final_container = None
 
-                # 先清除“思考中”提示（但保留 chat_container 供后续可能的清除）
                 chat_container.empty()
 
                 for chunk in stream_gen:
@@ -205,52 +219,37 @@ def chat_page():
                         full_response += content
                         final_container.markdown(full_response + "▌")
                     else:
-                        # 无标签内容（如直接聊天/搜索）：视为最终答案
                         if final_container is None:
                             final_container = st.empty()
                         full_response += chunk
                         final_container.markdown(full_response + "▌")
 
-                # 循环结束后的处理
+                # 循环结束处理
                 if not has_content:
-                    # 生成器没有任何输出
                     full_response = "⚠️ 抱歉，我暂时无法生成回答，请稍后重试。"
-                    # 如果没有容器，直接用 st.markdown 显示
                     if final_container is None:
                         st.markdown(full_response)
                     else:
                         final_container.markdown(full_response)
                 else:
-                    # 有内容，但 final_container 可能仍为 None（比如所有 chunk 都是 [THOUGHT] 等，但最后没有 [FINAL]）
-                    # 这种情况下，中间步骤已经通过 st.markdown 显示，但最终答案为空
                     if final_container is None:
-                        # 如果 full_response 为空，则显示提示；否则显示它
                         if not full_response:
                             st.markdown("⚠️ 回答生成完毕，但未输出有效内容。")
                         else:
                             st.markdown(full_response)
                     else:
-                        # 有容器，正常显示最终答案
                         final_container.markdown(full_response)
 
-                # 保存到历史（确保至少有一条消息）
+                # 保存历史
                 if not full_response:
                     full_response = "（空白回答）"
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
 
-                # 回答完成后更新 token 使用数量
                 update_token_display()
-
-                # 将本轮动态流式占位符转换为稳定的历史消息。
-                # 否则下次提交问题时，Streamlit 会在处理期间保留上一轮的灰色旧占位符，
-                # 与上方重新渲染的历史回答形成视觉重复。
                 st.rerun()
 
-
             except Exception as e:
-                # 记录详细错误日志
                 import traceback
                 error_details = traceback.format_exc()
                 logging.error(f"聊天页面发生错误: {error_details}")
-                # 用户友好提示
-                st.error("⚠️ 处理请求时出现意外错误，请稍后重试。")
+                st.error("⚠️ 请求处理时出现意外错误，请稍后重试。")

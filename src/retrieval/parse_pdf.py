@@ -6,7 +6,7 @@ from typing import List, Tuple
 
 import pymupdf4llm
 import pymupdf
-from collections import Counter
+from collections import Counter, defaultdict
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -18,78 +18,128 @@ CHUNK_OVERLAP = 150
 MIN_CHUNK_LEN = 20
 MAX_SECTION_LEN = 8000
 
-# Markdown 标题正则
+# ---------- 正则 ----------
 _HEADER_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 
-# 编号标题正则：匹配 "4.2.6 FR-06 數據採集—設備與過程採集" 或 "**4.2.6 ...**"
-# - 至少两级编号（4.2 以上）
-# - 后面跟大写字母或中文
-# - 整行不含句末标点
 _NUMBERED_HEADER_RE = re.compile(
     r"^(?:\*\*)?(\d+\.\d+(?:\.\d+)*)\s+([A-Z\u4e00-\u9fa5][^\n。，；！？]{1,79}?)(?:\*\*)?$",
     re.MULTILINE
 )
 
-# 目录行正则：结尾含 ".... 数字"
 _TOC_LINE_RE = re.compile(r"\.{3,}\s*\d+\s*$")
 
+_PAGE_MARKER_RE = re.compile(
+    r"(第\s*\d+\s*頁|第\s*\d+\s*页|Page\s*\d+|\d+\s*/\s*\d+\s*[頁页])",
+    re.IGNORECASE
+)
 
-# ---------- 工具函数 ----------
+
+# ====================================================================
+# 通用工具函数
+# ====================================================================
+def _clean_heading_title(s: str) -> str:
+    s = s.strip()
+    s = re.sub(r"^\*+\s*", "", s)
+    s = re.sub(r"\s*\*+$", "", s)
+    return s.strip()
+
+
 def _is_toc_line(line: str) -> bool:
-    """判断是否是目录行（含点线引导符 + 页码）"""
     return bool(_TOC_LINE_RE.search(line.strip()))
 
 
-def _extract_table_fields(content: str, max_fields: int = 12) -> list:
-    """从 Markdown 表格里提取字段名"""
+def _is_page_marker(text: str) -> bool:
+    return bool(_PAGE_MARKER_RE.search(text))
+
+
+def _page_marker_ratio(text: str) -> float:
+    matches = _PAGE_MARKER_RE.findall(text)
+    if not matches:
+        return 0.0
+    marker_chars = sum(len(m) for m in matches)
+    total = len(text.strip())
+    return marker_chars / total if total > 0 else 0.0
+
+
+def _normalize_chars(s: str) -> str:
+    return re.sub(r"[\s`*_\\|\[\]（）()：:；;，,。.、\-—/]", "", s)
+
+
+
+def _page_has_table(md_text: str, min_rows: int = 3) -> bool:
+    table_lines = sum(1 for l in md_text.split("\n") if l.strip().startswith("|"))
+    return table_lines >= min_rows
+
+# ====================================================================
+# 表格字段提取
+# ====================================================================
+def _extract_table_fields(content: str, max_fields: int = 15) -> list:
     fields = []
-    for line in content.split("\n")[:4]:
-        s = line.strip()
-        if not s.startswith("|"):
-            continue
+    lines = [l.strip() for l in content.split("\n") if l.strip().startswith("|")]
+    if not lines:
+        return []
+
+    header_line = None
+    for s in lines:
         if set(s) <= set("|-: "):
             continue
-        for cell in s.strip("|").split("|"):
-            c = cell.strip().strip("`*").strip()
-            if not c:
-                continue
-            if c.isdigit():
-                continue
-            if c.lower() in ("col2", "col3", "col4", "col5"):
-                continue
-            if c not in fields:
-                fields.append(c)
+        header_line = s
+        break
+    if not header_line:
+        return []
+
+    cells = [c.strip().strip("`*").strip() for c in header_line.strip("|").split("|")]
+    cells = [c for c in cells if c]
+    if not cells:
+        return []
+
+    has_digit = any(c.isdigit() for c in cells)
+
+    if has_digit or len(cells) <= 2:
+        for c in cells:
+            if c and not c.isdigit() and c.lower() not in ("col2", "col3", "col4", "col5"):
+                if c not in fields:
+                    fields.append(c)
+        if len(cells) == 2:
+            for line in lines:
+                if set(line) <= set("|-: "):
+                    continue
+                row_cells = [c.strip().strip("`*").strip() for c in line.strip("|").split("|")]
+                if row_cells:
+                    key = row_cells[0]
+                    if key and not key.isdigit() and key not in fields and len(key) < 20:
+                        fields.append(key)
+    else:
+        for i in range(0, len(cells), 2):
+            c = cells[i]
+            if c and not c.isdigit() and c.lower() not in ("col2", "col3", "col4", "col5"):
+                if c not in fields:
+                    fields.append(c)
+
     return fields[:max_fields]
 
 
-# ---------- 核心：按标题切分（含编号标题） ----------
+# ====================================================================
+# 按标题切分
+# ====================================================================
 def _split_by_headers(full_text: str) -> List[Tuple[int, int, List[str], str]]:
-    """
-    按 Markdown 标题 + 编号标题切分全文。
-    返回 [(start, end, heading_path, content), ...]
-    """
     matches = []
 
-    # 1. Markdown `#` 标题
     for m in _HEADER_RE.finditer(full_text):
         matches.append({
             "start": m.start(),
             "level": len(m.group(1)),
-            "title": m.group(2).strip(),
+            "title": _clean_heading_title(m.group(2)),
         })
 
-    # 2. 编号标题（含加粗）
     for m in _NUMBERED_HEADER_RE.finditer(full_text):
         line = m.group(0)
-        # 排除目录行
         if _is_toc_line(line):
             continue
-        # 跳过已经匹配的（Markdown 标题）
         if any(abs(m.start() - x["start"]) < 5 for x in matches):
             continue
-        # 编号层级：4.2.6 → 3 级 → ####
         level = m.group(1).count(".") + 2
-        title = line.strip().strip("*").strip()
+        title = _clean_heading_title(line)
         matches.append({
             "start": m.start(),
             "level": level,
@@ -103,7 +153,6 @@ def _split_by_headers(full_text: str) -> List[Tuple[int, int, List[str], str]]:
 
     sections = []
 
-    # 第一个标题之前的内容
     if matches[0]["start"] > 0:
         sections.append((0, matches[0]["start"], [], full_text[:matches[0]["start"]]))
 
@@ -125,8 +174,6 @@ def _split_by_headers(full_text: str) -> List[Tuple[int, int, List[str], str]]:
 
 
 def _mark_cross_references(text: str) -> str:
-    """把正文里引用其他任务的部分加标记"""
-    # 避免重复标记
     if "【引用其他任务" in text:
         return text
 
@@ -139,7 +186,6 @@ def _mark_cross_references(text: str) -> str:
 
 
 def _find_page(char_pos: int, page_offsets: List[Tuple[int, int, int]]):
-    """根据字符位置反查页码"""
     for start, end, page_num in page_offsets:
         if start <= char_pos < end:
             return page_num
@@ -147,7 +193,6 @@ def _find_page(char_pos: int, page_offsets: List[Tuple[int, int, int]]):
 
 
 def split_keep_tables(text: str):
-    """把 text 拆成 [(type, content), ...]，表格整体不切"""
     def _is_table_line(line: str) -> bool:
         s = line.strip()
         return bool(s) and s.startswith("|")
@@ -173,15 +218,39 @@ def split_keep_tables(text: str):
     return blocks
 
 
-# ---------- 正文起始页检测 ----------
+def _merge_split_tables(blocks: list) -> list:
+    merged = []
+    i = 0
+    while i < len(blocks):
+        btype, content = blocks[i]
+        if btype == "table":
+            j = i + 1
+            while j < len(blocks):
+                next_type, next_content = blocks[j]
+                if next_type == "table":
+                    content += "\n" + next_content
+                    j += 1
+                elif next_type == "text" and not next_content.strip():
+                    j += 1
+                else:
+                    break
+            merged.append(("table", content))
+            i = j
+        else:
+            merged.append(blocks[i])
+            i += 1
+    return merged
+
+
+# ====================================================================
+# 正文起始页检测
+# ====================================================================
 def detect_body_start_page(pages, min_chars=200):
-    """找到第一页正文，跳过封面/目录/说明页"""
     for i, p in enumerate(pages):
         lines = [l.strip() for l in p["text"].split("\n") if l.strip()]
         if not lines:
             continue
 
-        # 目录页特征：3 行以上含 ".... 页码"
         toc_lines = sum(1 for l in lines if _is_toc_line(l))
         if toc_lines >= 3:
             continue
@@ -203,19 +272,17 @@ def detect_body_start_page(pages, min_chars=200):
     return 0
 
 
-# ---------- 用底层 PyMuPDF 补全 md ----------
+# ====================================================================
+# 用底层 PyMuPDF 补全 md
+# ====================================================================
 def _supplement_page_md(page_md: str, page_num: int, doc) -> str:
-    """用底层 PyMuPDF 补全 pymupdf4llm 丢失的内容"""
     if page_num > doc.page_count:
         return page_md
 
     page = doc[page_num - 1]
     raw_text = page.get_text()
 
-    def _norm(s: str) -> str:
-        return re.sub(r"[\s`*_\\|\[\]（）()：:；;，,。.、]", "", s)
-
-    md_norm = _norm(page_md)
+    md_norm = _normalize_chars(page_md)
 
     raw_lines = raw_text.split("\n")
     missing_units = []
@@ -237,26 +304,26 @@ def _supplement_page_md(page_md: str, page_num: int, doc) -> str:
             continue
 
         unit = " ".join(unit_lines)
+        unit_norm = _normalize_chars(unit)
 
-        # 跳过页眉页脚
-        if any(kw in unit for kw in [
-            "System Requirement Analysis",
-            "DMP_Workplace_V3.1.1.1",
-            "_SA_V1.0",
-        ]):
-            continue
-        if unit.strip().isdigit():
-            continue
-        # 跳过目录行
-        if _is_toc_line(unit):
-            continue
-
-        unit_norm = _norm(unit)
+        # 太短，忽略
         if len(unit_norm) < 6:
             continue
 
-        if unit_norm not in md_norm:
-            missing_units.append(unit)
+        # 归一化精确匹配（这个是安全的）
+        if unit_norm in md_norm:
+            continue
+
+        # ---------- 只保留"页眉页脚"这一种最安全的过滤 ----------
+        # 其他一律不跳，宁可重复不可丢失
+        if _is_page_marker(unit):
+            matches = _PAGE_MARKER_RE.findall(unit)
+            if len(matches) >= 2:
+                continue
+            if _page_marker_ratio(unit) >= 0.10:
+                continue
+
+        missing_units.append(unit)
 
     if not missing_units:
         return page_md
@@ -272,7 +339,56 @@ def _supplement_page_md(page_md: str, page_num: int, doc) -> str:
     return page_md
 
 
-# ---------- 主解析函数 ----------
+# ====================================================================
+# 同页字符集子集去重
+# ====================================================================
+def _is_heading_chunk(content: str) -> bool:
+    stripped = content.strip()
+    if len(stripped) > 100:
+        return False
+    if re.search(r'\b\d+\.\d+(?:\.\d+)*\b', stripped):
+        return True
+    return False
+
+
+def _remove_duplicate_chunks(chunks: list) -> list:
+    by_page = defaultdict(list)
+    for c in chunks:
+        by_page[c.metadata.get("page")].append(c)
+
+    result = []
+    for page, page_chunks in by_page.items():
+        page_chunks.sort(key=lambda c: -len(c.page_content))
+        kept = []
+        for c in page_chunks:
+            if _is_heading_chunk(c.page_content):
+                kept.append(c)
+                continue
+
+            c_chars = set(_normalize_chars(c.page_content))
+            if not c_chars:
+                kept.append(c)
+                continue
+
+            is_redundant = False
+            for k in kept:
+                if _is_heading_chunk(k.page_content):
+                    continue
+                k_chars = set(_normalize_chars(k.page_content))
+                if c_chars.issubset(k_chars):
+                    overlap = len(c_chars & k_chars) / len(c_chars)
+                    if overlap >= 0.90:
+                        is_redundant = True
+                        break
+            if not is_redundant:
+                kept.append(c)
+        result.extend(kept)
+    return result
+
+
+# ====================================================================
+# 主解析函数
+# ====================================================================
 def parse_pdf_to_chunks(pdf_path, filename, chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP):
     top_y, bottom_y = detect_edge_y_bounds(pdf_path)
     logger.info(f"{filename}：页眉底={top_y}，页脚顶={bottom_y}")
@@ -301,7 +417,6 @@ def parse_pdf_to_chunks(pdf_path, filename, chunk_size=CHUNK_SIZE, chunk_overlap
     finally:
         raw_doc.close()
 
-    # 拼接 + 页偏移
     full_text = ""
     page_offsets = []
     for idx, p in enumerate(pages):
@@ -314,7 +429,6 @@ def parse_pdf_to_chunks(pdf_path, filename, chunk_size=CHUNK_SIZE, chunk_overlap
 
     sections = _split_by_headers(full_text)
 
-    # 剔除文档级标题
     doc_title = None
     if sections:
         first_page = _find_page(sections[0][0], page_offsets)
@@ -331,18 +445,28 @@ def parse_pdf_to_chunks(pdf_path, filename, chunk_size=CHUNK_SIZE, chunk_overlap
         if "contents" in last or "目录" in last or "目錄" in last:
             return True
 
-        # 目录行特征：2 行以上含 ".... 页码"
+        stripped = content.strip()
+
+        # 表格内容豁免（优先）
+        if stripped.startswith("|"):
+            return False
+
+        # 目录行
         lines = [l.strip() for l in content.split("\n") if l.strip()]
         toc_lines = sum(1 for l in lines if _is_toc_line(l))
         if toc_lines >= 2:
             return True
-
         if content.count("....") >= 3:
             return True
 
-        stripped = content.strip()
-        if stripped.startswith("|"):
-            return False
+        # 页眉页脚残留（只判多次出现或高占比）
+        if _is_page_marker(stripped):
+            matches = _PAGE_MARKER_RE.findall(stripped)
+            if len(matches) >= 2:
+                return True
+            if _page_marker_ratio(stripped) >= 0.10:
+                return True
+
         if len(stripped) < MIN_CHUNK_LEN:
             return True
         return False
@@ -366,10 +490,12 @@ def parse_pdf_to_chunks(pdf_path, filename, chunk_size=CHUNK_SIZE, chunk_overlap
         if len(sec_text.strip()) < MIN_CHUNK_LEN:
             continue
 
-        # 标记跨任务引用
         sec_text_marked = _mark_cross_references(sec_text)
 
-        for block_type, block in split_keep_tables(sec_text_marked):
+        blocks = split_keep_tables(sec_text_marked)
+        blocks = _merge_split_tables(blocks)
+
+        for block_type, block in blocks:
             block = block.strip()
             if len(block) < MIN_CHUNK_LEN:
                 continue
@@ -383,10 +509,8 @@ def parse_pdf_to_chunks(pdf_path, filename, chunk_size=CHUNK_SIZE, chunk_overlap
                 if len(sub) < MIN_CHUNK_LEN:
                     continue
 
-                # 反查位置
                 pos = full_text.find(sub, cursor)
                 if pos == -1:
-                    # 用原始未标记版本查
                     orig_sub = sub.replace("【引用其他任务，非本任务内容】", "").replace("【引用结束】", "")
                     pos = full_text.find(orig_sub, cursor)
                 if pos == -1:
@@ -395,7 +519,6 @@ def parse_pdf_to_chunks(pdf_path, filename, chunk_size=CHUNK_SIZE, chunk_overlap
                     cursor = max(cursor, pos)
                 page_num = _find_page(pos, page_offsets)
 
-                # 表格块：加语境前缀
                 if sub.startswith("|"):
                     fields = _extract_table_fields(sub)
                     prefix_parts = []
@@ -418,6 +541,15 @@ def parse_pdf_to_chunks(pdf_path, filename, chunk_size=CHUNK_SIZE, chunk_overlap
                     },
                 ))
 
+    before = len(chunks)
+    chunks = _remove_duplicate_chunks(chunks)
+    after = len(chunks)
+    if before != after:
+        logger.info(f"{filename}：去重 {before} → {after} chunk")
+
+    for i, c in enumerate(chunks):
+        c.metadata["chunk_index"] = i
+
     logger.info(f"{filename}：{len(pages)} 页 → {len(sections)} 章节 → {len(chunks)} chunk")
     return chunks
 
@@ -428,7 +560,6 @@ def parse_pdf_bytes_to_chunks(
     chunk_size: int = CHUNK_SIZE,
     chunk_overlap: int = CHUNK_OVERLAP,
 ) -> List[Document]:
-    """从字节流解析"""
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file_bytes)
         tmp_path = tmp.name
@@ -438,7 +569,9 @@ def parse_pdf_bytes_to_chunks(
         os.unlink(tmp_path)
 
 
-# ---------- 页眉页脚检测 ----------
+# ====================================================================
+# 页眉页脚检测
+# ====================================================================
 def detect_edge_y_bounds(pdf_path: str, ratio_threshold=0.5, edge_ratio=0.15):
     doc = pymupdf.open(pdf_path)
     n_pages = doc.page_count
