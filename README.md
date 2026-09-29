@@ -1,6 +1,6 @@
 # 🤖 Self Agent — 智能文档问答助手
 
-一个基于 **LangChain + ChromaDB + BGE Embedding + GLM-4.7-Flash** 构建的本地化智能助手，支持**内部知识库检索（RAG）**、**实时联网搜索**、**临时文件解读**和**ReAct 多步推理**，并提供友好的 Streamlit Web 界面。
+一个基于 **LangChain + ChromaDB + BGE Embedding + GLM-4.7-Flash** 构建的本地化智能助手，支持**内部知识库检索（RAG）**、**实时联网搜索**和**ReAct 多步推理**，并提供友好的 Streamlit Web 界面。
 
 ---
 
